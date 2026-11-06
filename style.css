@@ -63,6 +63,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #text.dim .w.said { color: var(--spoken); }
 #text .w.cur { text-decoration: underline; text-decoration-color: var(--marker); text-decoration-thickness: 0.08em; text-underline-offset: 0.12em; }
 #text .cue { color: var(--cue); font-weight: 500; }
+#text .cue.lang { font-size: 0.55em; vertical-align: middle; padding: 0.05em 0.4em; border: 2px solid var(--cue); border-radius: 0.4em; }
 #text .empty { color: var(--spoken); font-weight: 500; }
 
 #band {
@@ -181,12 +182,6 @@ body.bar-hidden #showBar { display: inline-flex; }
 .panel-head h2 { margin: 0; font-size: 20px; }
 .close { width: 40px; height: 40px; border-radius: 10px; border: 0; background: transparent; font-size: 26px; cursor: pointer; color: var(--ui-muted); }
 .close:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
-textarea#scriptInput {
-  flex: 1; min-height: 200px; resize: none;
-  padding: 14px; border-radius: 10px; border: 1px solid var(--ui-line);
-  background: #0e0f12; color: #f2f2f2; font-size: 17px; line-height: 1.5;
-}
-textarea#scriptInput:focus { outline: 2px solid var(--ui-accent); }
 .hint { margin: -4px 0 0; color: var(--ui-muted); font-size: 14px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .btn.ghost { background: transparent; }
@@ -205,6 +200,45 @@ label.btn { cursor: pointer; }
 .help ol { padding-left: 20px; margin: 0 0 10px; }
 .help p { margin: 8px 0; }
 
+.tbselect {
+  min-height: 40px; max-width: 190px; padding: 0 8px;
+  border: 1px solid var(--ui-line); border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06); color: var(--ui-fg); font-size: 15px; cursor: pointer;
+}
+.tbselect option { background: #17191d; }
+body.mode-auto #lang { display: none; }
+.tb:disabled { opacity: 0.35; cursor: default; }
+
+/* ---------- Editor ---------- */
+#editor {
+  position: fixed; left: 0; right: 0; top: 0; height: 100dvh; z-index: 25;
+  display: flex; flex-direction: column;
+  background: #0e0f12;
+  padding: 0 max(0px, env(safe-area-inset-right)) 0 max(0px, env(safe-area-inset-left));
+}
+#editor[hidden] { display: none; }
+.ed-bar {
+  display: flex; align-items: center; gap: 6px; flex: none;
+  padding: 8px 10px; padding-top: max(8px, env(safe-area-inset-top));
+  background: var(--ui-bg); border-bottom: 1px solid var(--ui-line);
+  overflow-x: auto; scrollbar-width: none;
+}
+.ed-bar::-webkit-scrollbar { display: none; }
+.ed-bar > * { flex: none; }
+.ed-bar .sep { width: 1px; height: 26px; background: var(--ui-line); margin: 0 2px; }
+#edScripts {
+  min-height: 40px; max-width: 220px; padding: 0 8px; border-radius: 10px;
+  border: 1px solid var(--ui-line); background: #0e0f12; color: var(--ui-fg); font-size: 15px; font-weight: 600;
+}
+.saved { color: var(--ui-muted); font-size: 13px; padding: 0 4px; }
+#scriptInput {
+  flex: 1; min-height: 0; width: 100%; resize: none; display: block;
+  padding: 16px max(16px, 4%); border: 0; outline: none;
+  background: #0e0f12; color: #f2f2f2;
+  font-size: 19px; line-height: 1.55;
+}
+.ed-hint { flex: none; margin: 0; padding: 6px 14px 8px; color: var(--ui-muted); font-size: 13px; border-top: 1px solid var(--ui-line); }
+
 /* ---------- Phones ---------- */
 @media (max-width: 700px) {
   #toolbar { gap: 4px; padding-left: 6px; padding-right: 6px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
@@ -212,7 +246,8 @@ label.btn { cursor: pointer; }
   #toolbar > * { flex: none; }
   #toolbar .stepper:not(#speedBox), #btnTop { display: none; }
   .tb span, .segbtn span { display: none; }
-  .tb #playLabel { display: inline; }
+  .tb #playLabel, .tb .keep { display: inline; }
+  .tbselect { max-width: 120px; font-size: 14px; }
   .tb.primary { min-width: 0; }
   .tb, .segbtn, .stepper button { min-height: 40px; padding: 0 7px; }
   #btnMirror span { display: none; }
@@ -221,4 +256,28 @@ label.btn { cursor: pointer; }
   .panel { padding: 8px; }
   .panel-card { padding: 14px; }
   #hearing { max-width: calc(100vw - 90px); left: 12px; transform: none; }
+}
+
+/* ---------- Short screens: phones held sideways ---------- */
+@media (max-height: 520px) {
+  #toolbar { gap: 4px; padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: 4px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  #toolbar::-webkit-scrollbar { display: none; }
+  #toolbar > * { flex: none; }
+  .tb span, .segbtn span { display: none; }
+  .tb #playLabel, .tb .keep { display: inline; }
+  .tb, .segbtn, .stepper button, .tbselect, #edScripts { min-height: 34px; font-size: 14px; }
+  .tb, .segbtn, .stepper button { padding: 0 8px; }
+  .tb svg, .segbtn svg { width: 18px; height: 18px; }
+  .tb.primary { min-width: 0; }
+  .tbselect { max-width: 150px; }
+  #btnMirror span { display: none; }
+  .ed-bar { padding-top: max(4px, env(safe-area-inset-top)); padding-bottom: 4px; }
+  .ed-hint { display: none; }
+  #scriptInput { font-size: 17px; padding-top: 10px; padding-bottom: 10px; }
+  #toast { top: 52px; }
+  #hearing { bottom: max(8px, env(safe-area-inset-bottom)); padding: 4px 12px; font-size: 13px; }
+  #showBar { width: 40px; height: 40px; }
+  .panel { padding: 8px; }
+  .panel-card { max-height: calc(100dvh - 16px); padding: 12px 16px; gap: 10px; }
+  .grid { grid-template-columns: 1fr 1fr 1fr; gap: 10px 16px; }
 }

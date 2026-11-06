@@ -6,22 +6,40 @@ the device they were typed on.
 
 ## How to use it
 
-1. **Script** → paste the script, or **Open file** (.txt or Word .docx). You can also drag a file onto
-   the window. Text in `[square brackets]` shows in yellow and is skipped by voice follow, so use it
-   for notes like `[PAUSE]`.
-2. Pick **Voice** (follows the speaker) or **Auto** (scrolls at a set speed, with − / + for speed).
-3. Press **Start**. The first time, allow the microphone.
-4. The speaker reads the line on the blue band. Words already said turn gray. If they ad-lib, pause
+1. **Edit** → write or paste the script, or **Import** a .txt or Word .docx file (each import becomes
+   a new saved script). The editor saves as you type, has Undo/Redo and Paste buttons (handy on
+   phones), and keeps several scripts on the device: pick one from the list, **+** for a new one,
+   **Rename**, **Delete**, **Export** (saves a .txt; on phones it opens the share sheet). Press
+   **Prompt** to go back. You can also drag a file onto the window.
+   Text in `[square brackets]` shows in yellow and is skipped by voice follow, so use it for notes
+   like `[PAUSE]`.
+2. **Edit right where you are:** tap a word (or double-tap it) in the prompter, fix the text, press
+   **Prompt**, and it picks up at the same spot, even if you added or removed text above it.
+3. Pick **Voice** (follows the speaker) or **Auto** (scrolls at a set speed, with − / + for speed).
+4. Pick the **language** next to it: **Auto** guesses English or Spanish from the script, or choose
+   English (US), Español (Latinoamérica), Español (México) or Español (Ecuador). Your choice is
+   remembered on that device and always wins over the guess. If a browser can't listen in Ecuador
+   Spanish, it switches to Latin American Spanish and says so.
+5. **Mixed English and Spanish:** put `[ES]` on its own line before a Spanish part and `[EN]` before an
+   English part. The prompter switches the listening language when the reader gets there. It listens
+   to one language at a time, so a single sentence that mixes both languages follows less well.
+6. Press **Start**. The first time, allow the microphone.
+7. The speaker reads the line on the blue band. Words already said turn gray. If they ad-lib, pause
    or skip a line, the prompter waits and then catches up when they're back on the script. It only
    goes backward if they clearly repeat an earlier passage.
-5. Tap or click any word to jump there; drag or use the mouse wheel to move by hand.
-6. **Mirror** (or the M key) cycles: off → flip left-right (the usual setting for beam-splitter glass)
+8. Tap or click any word to jump there; drag or use the mouse wheel to move by hand.
+9. **Mirror** (or the M key) cycles: off → flip left-right (the usual setting for beam-splitter glass)
    → flip upside down → both. Only the script flips; the buttons stay readable.
-7. **Settings**: text size, line spacing, side margins, reading-line height, font, colors, marker
+10. **Settings**: text size, line spacing, side margins, reading-line height, font, colors, marker
    style, ALL CAPS, centered text.
 
+**Phones:** made to be held sideways. On Android, Start goes full screen and locks the screen
+sideways (turn this off in Settings). iPhone doesn't let web pages lock the rotation: turn off
+Portrait Orientation Lock in Control Center and hold the phone sideways. The button bar is slim
+sideways and hides itself while prompting.
+
 Keys: Space = start/pause · ↑ ↓ = nudge a line · ← → = slower/faster · Page Up/Down · Home = top ·
-M = mirror · F = fullscreen · + / − = text size · Esc = stop. Presentation clickers send these keys,
+E = edit · M = mirror · F = fullscreen · + / − = text size · Esc = stop. Presentation clickers send these keys,
 so they work too.
 
 While running, the button bar hides after 3 seconds; move the mouse or tap the ••• button to bring
@@ -66,8 +84,11 @@ that already have it pick up the new version the second time they open it.
 
 - `index.html`, `style.css`, `app.js` (UI, scrolling, speech recognition, settings), `matcher.js`
   (voice → script position), `docx.js` (Word text extraction, no libraries), `sw.js` (offline cache).
-- `node tests/matcher.test.js` runs the matcher tests (misheard words, ad-libs, skipped lines, pauses,
-  repeats).
+- `node tests/matcher.test.js` and `node tests/matcher-es.test.js` run the matcher tests (misheard
+  words, ad-libs, skipped lines, pauses, repeats; Spanish accents, ¿ ¡, ñ, numbers as digits or
+  words in both languages).
+- Scripts are stored in localStorage (`kprompter.library.v1`); positions are saved as character
+  offsets so they survive edits.
 - Real-speech test in Chrome: Chrome's `SpeechRecognition.start(track)` can take an audio track, so
   an automated test can set `window.__prompterTestTrack` to a track playing a recording (e.g. a
   Windows text-to-speech WAV) before pressing Start. `window.__prompterDebug = true` logs every move.

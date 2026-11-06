@@ -1,5 +1,5 @@
 // Offline support: serve the app from the cache, refresh the cache in the background.
-const CACHE = "kprompter-v1";
+const CACHE = "kprompter-v2";
 const FILES = ["./", "index.html", "style.css", "app.js", "matcher.js", "docx.js", "manifest.webmanifest",
   "icons/icon.svg", "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png"];
 

@@ -11,52 +11,72 @@
 (function (root) {
   "use strict";
 
-  const SMALL_NUMBERS = [
-    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
-    "nineteen", "twenty",
-  ];
-  const TENS = { 30: "thirty", 40: "forty", 50: "fifty", 60: "sixty", 70: "seventy", 80: "eighty", 90: "ninety", 100: "hundred" };
+  // Number words in English and Spanish map to digit tokens, and digits are split the same way,
+  // so "45", "forty-five" and "cuarenta y cinco" all line up (40, 5).
+  const NUMBER_WORDS = {
+    zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
+    eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
+    eighty: 80, ninety: 90, hundred: 100,
+    cero: 0, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9,
+    diez: 10, once: 11, doce: 12, trece: 13, catorce: 14, quince: 15, dieciseis: 16, diecisiete: 17,
+    dieciocho: 18, diecinueve: 19, veinte: 20, treinta: 30, cuarenta: 40, cincuenta: 50, sesenta: 60,
+    setenta: 70, ochenta: 80, noventa: 90, cien: 100, ciento: 100,
+  };
+  const VEINTI = { un: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9 };
   const ALIASES = {
     ok: "okay", "&": "and", "%": "percent", mr: "mister", mrs: "missus", dr: "doctor", st: "saint",
     vs: "versus", gonna: "going", wanna: "want", lets: "let", "1st": "first", "2nd": "second",
-    "3rd": "third",
+    "3rd": "third", "1ro": "primero", "1er": "primer", "2do": "segundo", "3ro": "tercero",
   };
 
-  /** Lowercase, strip punctuation/accents, map digits and common spellings to one form. */
-  function normalizeWord(raw) {
+  function numberTokens(n) {
+    if (n <= 20 || (n <= 100 && n % 10 === 0)) return [String(n)];
+    if (n < 100) return [String(n - (n % 10)), String(n % 10)];
+    return [String(n)];
+  }
+
+  /**
+   * Lowercase, strip accents (á→a, ñ→n, ü→u) and punctuation (incl. ¿ ¡), map numbers and common
+   * spellings to one form. Returns zero or more tokens.
+   */
+  function normalizeTokens(raw) {
     let w = String(raw).toLowerCase()
       .normalize("NFD").replace(/[̀-ͯ]/g, "")
       .replace(/[‘’ʼ']/g, "")
       .replace(/^[^a-z0-9&%$]+|[^a-z0-9%]+$/g, "");
     if (w.startsWith("$")) w = w.slice(1);
-    w = w.replace(/,/g, "");
-    if (/^\d+$/.test(w)) {
-      const n = parseInt(w, 10);
-      if (n <= 20) return SMALL_NUMBERS[n];
-      if (TENS[n]) return TENS[n];
-      return w;
-    }
+    if (/^\d[\d,.]*$/.test(w)) w = w.replace(/[,.](?=\d{3}\b)/g, "");
+    if (/^\d+$/.test(w)) return numberTokens(parseInt(w, 10));
     w = w.replace(/[^a-z0-9%&]/g, "");
-    return ALIASES[w] || w;
+    if (!w) return [];
+    if (w in NUMBER_WORDS) return [String(NUMBER_WORDS[w])];
+    const v = /^veinti(\w+)$/.exec(w);
+    if (v && VEINTI[v[1]]) return ["20", String(VEINTI[v[1]])];
+    return [ALIASES[w] || w];
   }
+  function normalizeWord(raw) { return normalizeTokens(raw).join(" "); }
 
   /** Split text into words the way the matcher sees them (hyphens and slashes split words). */
   function tokenize(text) {
     const out = [];
     for (const piece of String(text).split(/[\s—–\-\/]+/)) {
-      const n = normalizeWord(piece);
-      if (!n) continue;
-      // 21..99 -> "forty five" so "45" in a transcript matches "forty-five" in a script.
-      if (/^\d\d$/.test(n)) {
-        const v = +n, t = Math.floor(v / 10) * 10;
-        out.push(TENS[t] || (t === 20 ? "twenty" : n));
-        if (v % 10) out.push(SMALL_NUMBERS[v % 10]);
-        continue;
-      }
-      out.push(n);
+      for (const t of normalizeTokens(piece)) out.push(t);
     }
     return out;
+  }
+
+  /** Guess whether a text is Spanish or English. */
+  const ES_HINTS = new Set(("de la que el en los se del las por con una para es al lo como mas pero sus le ya este " +
+    "porque esta cuando muy sin sobre tambien hasta hay donde desde todo nos ella y su son estos usted ustedes " +
+    "nuestro nuestra hola gracias bienvenidos").split(" "));
+  const EN_HINTS = new Set(("the and of to is that it for you with on was are this be have not at but they from " +
+    "or by we an your our will what about there their can just".split(" ")));
+  function detectLanguage(text) {
+    const marks = (String(text).match(/[áéíóúñ¿¡]/gi) || []).length;
+    let es = marks * 2, en = 0;
+    for (const w of tokenize(text)) { if (ES_HINTS.has(w)) es++; if (EN_HINTS.has(w)) en++; }
+    return es > en ? "es" : "en";
   }
 
   function levenshtein(a, b) {
@@ -80,7 +100,7 @@
 
   /** Rough "sounds alike" key: drop vowels after the first letter, collapse doubles. */
   function skeleton(w) {
-    const v = w.replace(/gh/g, "").replace(/ph/g, "f").replace(/ck/g, "k").replace(/c(?=[eiy])/g, "s").replace(/c/g, "k");
+    const v = w.replace(/gh/g, "").replace(/qu/g, "k").replace(/ll/g, "y").replace(/v/g, "b").replace(/z/g, "s").replace(/ph/g, "f").replace(/ck/g, "k").replace(/c(?=[eiy])/g, "s").replace(/c/g, "k");
     return (v[0] || "") + v.slice(1).replace(/[aeiouyhw]/g, "").replace(/(.)\1+/g, "$1");
   }
 
@@ -103,7 +123,9 @@
   const COMMON = new Set(("a an the and or but of to in on at for with is are was were be been it its this that " +
     "these those i you he she we they me my your our their his her them us so as if then than there here " +
     "do does did not no yes just can will would could should have has had from by up out about what when " +
-    "who how all some more very").split(" "));
+    "who how all some more very " +
+    "de la que el en y los se del las un una por con no su para es al lo como mas pero sus le ya o este si " +
+    "porque esta entre cuando muy sin sobre me hasta hay donde desde todo nos ni eso esto mi yo te tu").split(" "));
   function weight(w) {
     if (COMMON.has(w)) return 0.6;
     return w.length >= 6 ? 1.25 : 1;
@@ -246,7 +268,7 @@
     return { pos: newPos, score: best.score, moved: newPos !== pos };
   }
 
-  const api = { normalizeWord, tokenize, similarity, locate, DEFAULTS };
+  const api = { normalizeWord, tokenize, similarity, locate, detectLanguage, DEFAULTS };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.PrompterMatcher = api;
 })(typeof self !== "undefined" ? self : this);

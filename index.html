@@ -25,8 +25,8 @@
 
   <!-- Toolbar: never mirrored. -->
   <header id="toolbar">
-    <button id="btnScript" class="tb" title="Edit the script">
-      <svg viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5z M14 3v5h5 M8 12h8 M8 16h8"/></svg><span>Script</span>
+    <button id="btnEdit" class="tb" title="Edit the script (E). Double-tap a word to edit right there.">
+      <svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z M13.5 6.5l4 4"/></svg><span>Edit</span>
     </button>
     <div class="seg" role="group" aria-label="How the script moves">
       <button id="modeVoice" class="segbtn" aria-pressed="true" title="Follow my voice">
@@ -36,6 +36,13 @@
         <svg viewBox="0 0 24 24"><path d="M12 4v14 M6 12l6 6 6-6"/></svg><span>Auto</span>
       </button>
     </div>
+    <select id="lang" class="tbselect" title="Voice language">
+      <option value="auto">Auto: English</option>
+      <option value="en-US">English (US)</option>
+      <option value="es-US">Español (Latinoamérica)</option>
+      <option value="es-MX">Español (México)</option>
+      <option value="es-EC">Español (Ecuador)</option>
+    </select>
     <button id="btnPlay" class="tb primary" title="Start / pause (Space)">
       <svg class="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></svg>
       <svg class="i-pause" viewBox="0 0 24 24"><path d="M7 4h4v16H7z M14 4h4v16h-4z"/></svg>
@@ -76,22 +83,25 @@
   <div id="hearing" hidden><span class="dot"></span><span id="hearingText">Listening…</span></div>
   <div id="toast" role="status" aria-live="polite" hidden></div>
 
-  <!-- Script panel -->
-  <section id="scriptPanel" class="panel" hidden aria-label="Script">
-    <div class="panel-card wide">
-      <div class="panel-head">
-        <h2>Script</h2>
-        <button class="close" data-close aria-label="Close">&times;</button>
-      </div>
-      <textarea id="scriptInput" spellcheck="true" placeholder="Paste or type your script here…"></textarea>
-      <p class="hint">Words in [square brackets] show in yellow and aren't read, so use them for notes like [PAUSE] or [SMILE].</p>
-      <div class="row">
-        <label class="btn"><input id="fileInput" type="file" accept=".txt,.text,.md,.docx,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>Open file (.txt / .docx)</label>
-        <button id="btnClear" class="btn ghost">Clear</button>
-        <span class="spacer"></span>
-        <button id="btnScriptDone" class="btn primary">Done</button>
-      </div>
+  <!-- Script editor (full screen) -->
+  <section id="editor" hidden aria-label="Script editor">
+    <div class="ed-bar">
+      <select id="edScripts" title="Saved scripts"></select>
+      <button id="edNew" class="tb" title="New script"><svg viewBox="0 0 24 24"><path d="M12 5v14 M5 12h14"/></svg><span>New</span></button>
+      <button id="edRename" class="tb" title="Rename this script"><svg viewBox="0 0 24 24"><path d="M4 18l4-12 4 12 M5.5 14h5 M15 6v12 M13 6h4 M13 18h4"/></svg><span>Rename</span></button>
+      <button id="edDelete" class="tb" title="Delete this script"><svg viewBox="0 0 24 24"><path d="M5 7h14 M10 7V4h4v3 M7 7l1 13h8l1-13"/></svg><span>Delete</span></button>
+      <span class="sep"></span>
+      <button id="edUndo" class="tb icon" title="Undo (Ctrl+Z)" aria-label="Undo"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5 M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+      <button id="edRedo" class="tb icon" title="Redo (Ctrl+Y)" aria-label="Redo"><svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5 M20 9H10a6 6 0 0 0 0 12h3"/></svg></button>
+      <button id="edPaste" class="tb" title="Paste"><svg viewBox="0 0 24 24"><path d="M9 4h6v3H9z M8 5H5v16h14V5h-3"/></svg><span>Paste</span></button>
+      <label class="tb" title="Import a .txt or Word .docx file as a new script"><input id="fileInput" type="file" accept=".txt,.text,.md,.docx,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden><svg viewBox="0 0 24 24"><path d="M12 4v11 M7 10l5 5 5-5 M5 20h14"/></svg><span>Import</span></label>
+      <button id="edExport" class="tb" title="Save or share this script as a .txt file"><svg viewBox="0 0 24 24"><path d="M12 15V4 M7 9l5-5 5 5 M5 20h14"/></svg><span>Export</span></button>
+      <span class="spacer"></span>
+      <span id="edSaved" class="saved">Saved</span>
+      <button id="edDone" class="tb primary" title="Back to the prompter (Esc)"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></svg><span class="keep">Prompt</span></button>
     </div>
+    <textarea id="scriptInput" spellcheck="true" autocapitalize="sentences" placeholder="Type or paste your script here…"></textarea>
+    <p class="ed-hint">Saved automatically. [Notes in brackets] show in yellow and aren't read. A line with [ES] or [EN] switches the listening language from there on.</p>
   </section>
 
   <!-- Settings panel -->
@@ -140,6 +150,7 @@
         <label class="check"><input type="checkbox" id="centerText"> Center the text</label>
         <label class="check"><input type="checkbox" id="showHearing"> Show what the mic hears</label>
         <label class="check"><input type="checkbox" id="dimSpoken"> Gray out words already spoken</label>
+        <label class="check"><input type="checkbox" id="lockLandscape"> Phones: go full screen and turn sideways when I press Start</label>
       </div>
       <div class="row">
         <button id="btnReset" class="btn ghost">Reset to defaults</button>
@@ -158,16 +169,19 @@
       </div>
       <div class="help">
         <ol>
-          <li><b>Script</b>: paste your script, or open a .txt or Word (.docx) file.</li>
+          <li><b>Edit</b>: write, paste or import (.txt or Word .docx) your script. It saves as you type, and you can keep several scripts on this device.</li>
           <li>Choose <b>Voice</b> (the script follows you as you talk) or <b>Auto</b> (it scrolls at a set speed).</li>
+          <li>Pick the language: <b>Auto</b> guesses English or Spanish from the script; or choose one. Your choice wins.</li>
           <li>Press <b>Start</b>. For Voice, allow the microphone the first time.</li>
           <li>Read the line on the band. Ad-lib, pause or skip a line: it waits and catches up.</li>
-          <li>Tap or click any word to jump there. Drag or use the mouse wheel to scroll by hand.</li>
+          <li>Tap a word to jump there. Double-tap a word to edit the script right there; press <b>Prompt</b> to come back to the same spot.</li>
         </ol>
+        <p><b>Spanish and English in one script:</b> put <b>[ES]</b> on its own line before the Spanish part and <b>[EN]</b> before the English part. The prompter switches the listening language when the reader gets there. It listens to one language at a time.</p>
+        <p><b>Phones:</b> hold the phone sideways. On Android, Start goes full screen and locks it sideways. iPhone can't lock from a web page, so just turn it.</p>
         <p><b>Teleprompter glass:</b> use <b>Mirror</b>. "Flip left-right" is the usual setting for a
           beam-splitter rig. Use "Flip upside down" or "Both" if your screen sits the other way.</p>
         <p><b>Keys:</b> Space = start/pause · ↑ ↓ = nudge a line · ← → = slower/faster ·
-          Page Up/Down = a screen · Home = top · M = mirror · F = fullscreen · + / − = text size.
+          Page Up/Down = a screen · Home = top · E = edit · M = mirror · F = fullscreen · + / − = text size.
           Presentation clickers work too.</p>
         <p><b>Voice follow</b> works in Chrome, Edge and Safari (including iPhone and iPad), not Firefox.
           Chrome and Edge need an internet connection for it; Auto mode works offline.</p>

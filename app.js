@@ -3,15 +3,17 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   const M = window.PrompterMatcher;
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
 
   // ---------------------------------------------------------------- settings / storage
   const KEY_SETTINGS = "kprompter.settings.v1";
-  const KEY_SCRIPT = "kprompter.script.v1";
-  const KEY_POS = "kprompter.pos.v1";
+  const KEY_LIB = "kprompter.library.v1";
+  const KEY_OLD_SCRIPT = "kprompter.script.v1";
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const DEFAULTS = {
-    fontSize: Math.round(Math.min(96, Math.max(34, window.innerWidth / 14))),
-    lineHeight: 1.45,
-    margin: window.innerWidth < 700 ? 5 : 10,
+    fontSize: Math.round(clamp(Math.min(window.innerWidth / 16, window.innerHeight / 7.5), 30, 96)),
+    lineHeight: 1.4,
+    margin: window.innerWidth < 1000 ? 5 : 10,
     readingLine: 33,
     speed: 4,
     font: "sans",
@@ -25,11 +27,13 @@
     centerText: false,
     showHearing: true,
     dimSpoken: true,
+    lockLandscape: true,
     mode: "voice",
+    lang: "auto",
   };
   const SAMPLE = `Welcome to Kaimotion Prompter.
 
-Press Script to paste your own script, or open a text or Word file.
+Press Edit to write or paste your own script, or import a text or Word file.
 
 Choose Voice and press Start. Then just read out loud. The script follows your voice and keeps the line you're reading on the band.
 
@@ -37,20 +41,41 @@ Choose Voice and press Start. Then just read out loud. The script follows your v
 
 You can ad-lib, pause, or skip a line. It waits for you, then catches up when you're back on the script.
 
-Tap any word to jump there. Use Mirror when the screen sits under teleprompter glass.
+Tap any word to jump there. Double-tap a word to edit the script right there. Use Mirror when the screen sits under teleprompter glass.
 
+[ES]
+También funciona en español. Una línea con ES entre corchetes cambia el idioma de escucha.
+
+[EN]
 Thanks for watching, and we'll see you in the next video.`;
 
   function load(key, fallback) {
     try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v); } catch { return fallback; }
   }
   function save(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode: ignore */ }
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* private mode / full: ignore */ }
   }
 
   const S = Object.assign({}, DEFAULTS, load(KEY_SETTINGS, {}));
-  let scriptText = load(KEY_SCRIPT, null);
-  if (typeof scriptText !== "string" || !scriptText.trim()) scriptText = SAMPLE;
+
+  // ---------------------------------------------------------------- script library (saved on this device)
+  const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  let lib = load(KEY_LIB, null);
+  if (!lib || !Array.isArray(lib.scripts) || !lib.scripts.length) {
+    lib = { scripts: [], currentId: null };
+    const old = load(KEY_OLD_SCRIPT, null);
+    if (typeof old === "string" && old.trim()) lib.scripts.push({ id: newId(), name: "My script", text: old, posChar: 0, updated: Date.now() });
+    lib.scripts.push({ id: newId(), name: "Welcome (sample)", text: SAMPLE, posChar: 0, updated: Date.now() });
+    lib.currentId = lib.scripts[0].id;
+    save(KEY_LIB, lib);
+  }
+  function cur() { return lib.scripts.find((s) => s.id === lib.currentId) || lib.scripts[0]; }
+  let libTimer = 0;
+  function saveLib(now) {
+    clearTimeout(libTimer);
+    if (now) save(KEY_LIB, lib); else libTimer = setTimeout(() => save(KEY_LIB, lib), 300);
+  }
+  const cleanText = (t) => String(t).replace(/\r\n?/g, "\n");
 
   // ---------------------------------------------------------------- DOM refs
   const stage = $("stage"), textEl = $("text");
@@ -58,55 +83,125 @@ Thanks for watching, and we'll see you in the next video.`;
 
   // ---------------------------------------------------------------- script rendering
   let wordEls = [];      // matchable word spans, in order
-  let scriptWords = [];  // normalized form of each matchable word (one entry per matcher token)
+  let scriptWords = [];  // normalized matcher tokens
   let tokenToEl = [];    // matcher token index -> index in wordEls
   let elFirstToken = []; // wordEls index -> first matcher token index
+  let tokenLang = [];    // matcher token index -> "es" / "en" from an [ES]/[EN] tag, or null
+  let detectedFamily = "en";
+  const LANG_TAG = /^\[\s*(es|esp|espa[ñn]ol|spanish|en|eng|english|ingl[ée]s)\s*\]$/i;
 
   function renderScript() {
+    const text = cleanText(cur().text);
     textEl.textContent = "";
-    wordEls = []; scriptWords = []; tokenToEl = []; elFirstToken = [];
-    const paragraphs = scriptText.replace(/\r\n?/g, "\n").split(/\n/);
-    for (const para of paragraphs) {
+    wordEls = []; scriptWords = []; tokenToEl = []; elFirstToken = []; tokenLang = [];
+    let section = null;
+    let lineStart = 0;
+    let plain = "", untagged = "";
+    for (const line of text.split("\n")) {
       const p = document.createElement("p");
-      // Split into [cue] blocks and plain text.
-      const parts = para.split(/(\[[^\]]*\])/);
-      for (const part of parts) {
+      let off = lineStart;
+      for (const part of line.split(/(\[[^\]]*\])/)) {
         if (!part) continue;
         if (/^\[[^\]]*\]$/.test(part)) {
           const c = document.createElement("span");
-          c.className = "cue";
+          const tag = LANG_TAG.exec(part);
+          if (tag) {
+            section = /^(es|esp|espa)/i.test(tag[1]) || /spanish/i.test(tag[1]) ? "es" : "en";
+            c.className = "cue lang";
+          } else c.className = "cue";
           c.textContent = part;
           p.appendChild(c);
+          off += part.length;
           continue;
         }
-        const pieces = part.split(/(\s+)/);
-        for (const piece of pieces) {
+        plain += part + "\n";
+        if (!section) untagged += part + "\n";
+        for (const piece of part.split(/(\s+)/)) {
           if (!piece) continue;
-          if (/^\s+$/.test(piece)) { p.appendChild(document.createTextNode(" ")); continue; }
+          if (/^\s+$/.test(piece)) { p.appendChild(document.createTextNode(" ")); off += piece.length; continue; }
           const tokens = M.tokenize(piece);
-          if (!tokens.length) { p.appendChild(document.createTextNode(piece)); continue; }
+          if (!tokens.length) { p.appendChild(document.createTextNode(piece)); off += piece.length; continue; }
           const span = document.createElement("span");
           span.className = "w";
           span.textContent = piece;
           const ei = wordEls.length;
           span.dataset.i = ei;
+          span.dataset.c = off;
           wordEls.push(span);
           elFirstToken.push(scriptWords.length);
-          for (const t of tokens) { scriptWords.push(t); tokenToEl.push(ei); }
+          for (const t of tokens) { scriptWords.push(t); tokenToEl.push(ei); tokenLang.push(section); }
           p.appendChild(span);
+          off += piece.length;
         }
       }
       textEl.appendChild(p);
+      lineStart += line.length + 1;
     }
     if (!wordEls.length) {
       const p = document.createElement("p");
       p.className = "empty";
-      p.textContent = "No script yet. Press Script to add one.";
+      p.textContent = "This script is empty. Press Edit to write one.";
       textEl.appendChild(p);
     }
+    // Auto language comes from the text that has no [ES]/[EN] tag (or from everything if all is tagged).
+    detectedFamily = M.detectLanguage(untagged.trim() ? untagged : plain);
+    updateAutoLabel();
     saidUpTo = 0;
     curEl = null;
     layoutDirty = true;
+  }
+
+  /** Character offset in the script of the word at the voice position. */
+  function charOfPos() {
+    if (!wordEls.length) return 0;
+    if (pos >= scriptWords.length) return cleanText(cur().text).length;
+    return +wordEls[tokenToEl[pos]].dataset.c;
+  }
+  /** Token index of the word at (or right after) a character offset. */
+  function posFromChar(c) {
+    if (!wordEls.length) return 0;
+    let lo = 0, hi = wordEls.length - 1, best = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (+wordEls[mid].dataset.c <= c) { best = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    if (best < 0) return 0;
+    const el = wordEls[best];
+    if (c < +el.dataset.c + el.textContent.length) return elFirstToken[best];
+    return best + 1 < wordEls.length ? elFirstToken[best + 1] : scriptWords.length;
+  }
+
+  /** Show the current script in the prompter, positioned at a character offset. */
+  function loadCurrent(atChar) {
+    renderScript();
+    measure();
+    pos = posFromChar(atChar || 0);
+    listener.resetHeard();
+    paintSaid();
+    if (wordEls.length) {
+      const i = pos >= scriptWords.length ? wordEls.length - 1 : tokenToEl[pos];
+      offset = target = offsetFor(wordEls[i]);
+    } else offset = target = 0;
+    updateListenerLang();
+  }
+
+  // ---------------------------------------------------------------- language
+  const LANG_NAMES = { "en-US": "English", "es-US": "Español (Latinoamérica)", "es-MX": "Español (México)", "es-EC": "Español (Ecuador)" };
+  const langFallback = {};
+  function resolveFamily(fam) {
+    if (S.lang !== "auto" && S.lang.startsWith(fam)) return S.lang;
+    return fam === "es" ? "es-US" : "en-US";
+  }
+  function defaultFamily() { return S.lang === "auto" ? detectedFamily : S.lang.slice(0, 2); }
+  function langAt(p) {
+    const fam = (tokenLang.length ? tokenLang[Math.min(p, tokenLang.length - 1)] : null) || defaultFamily();
+    const l = resolveFamily(fam);
+    return langFallback[l] || l;
+  }
+  function updateListenerLang() { listener.setLang(langAt(pos)); }
+  function updateAutoLabel() {
+    const opt = $("lang").querySelector('option[value="auto"]');
+    if (opt) opt.textContent = "Auto: " + (detectedFamily === "es" ? "Español" : "English");
   }
 
   // ---------------------------------------------------------------- apply settings
@@ -136,11 +231,12 @@ Thanks for watching, and we'll see you in the next video.`;
     save(KEY_SETTINGS, S);
   }
   function updateReadingPx() {
-    document.documentElement.style.setProperty("--reading-px", Math.round(window.innerHeight * S.readingLine / 100) + "px");
+    document.documentElement.style.setProperty("--reading-px", readingPx() + "px");
   }
 
   const FORM_KEYS = ["fontSize", "lineHeight", "margin", "readingLine", "speed", "font", "marker", "mirror",
-    "textColor", "bgColor", "spokenColor", "markerColor", "caps", "centerText", "showHearing", "dimSpoken"];
+    "textColor", "bgColor", "spokenColor", "markerColor", "caps", "centerText", "showHearing", "dimSpoken",
+    "lockLandscape", "lang"];
   const FORMAT = { fontSize: (v) => v + " px", lineHeight: (v) => Number(v).toFixed(2), margin: (v) => v + "%", readingLine: (v) => v + "% down", speed: (v) => v };
   function syncSettingsForm() {
     for (const k of FORM_KEYS) {
@@ -152,16 +248,18 @@ Thanks for watching, and we'll see you in the next video.`;
   }
   for (const k of FORM_KEYS) {
     const el = $(k);
-    el.addEventListener("input", () => {
+    el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
       let v = el.type === "checkbox" ? el.checked : el.value;
       if (el.type === "range") v = Number(v);
       setSetting(k, v);
+      if (el.tagName === "SELECT") el.blur();
     });
   }
   function setSetting(k, v) {
     const anchor = currentAnchorEl();
     S[k] = v;
     applySettings();
+    if (k === "lang") updateListenerLang();
     // Keep the same spot on the reading line after the text reflows.
     if (anchor && ["fontSize", "lineHeight", "margin", "readingLine", "font", "caps", "centerText"].includes(k)) {
       measure();
@@ -192,19 +290,15 @@ Thanks for watching, and we'll see you in the next video.`;
     const center = el.offsetTop + el.offsetHeight / 2;
     return clamp(center - (readingPx() + lineH / 2), 0, maxOffset);
   }
-  function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
-  /** The word span currently sitting on the reading line. */
+  /** The first word on the line currently sitting on the reading band. */
   function currentAnchorEl() {
     if (!wordEls.length) return null;
     const y = offset + readingPx() + lineH / 2;
-    // binary search by offsetTop
     let lo = 0, hi = wordEls.length - 1, best = 0;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      const el = wordEls[mid];
-      if (el.offsetTop <= y - lineH / 2 + 2) { best = mid; lo = mid + 1; } else hi = mid - 1;
+      if (wordEls[mid].offsetTop <= y - lineH / 2 + 2) { best = mid; lo = mid + 1; } else hi = mid - 1;
     }
-    // first word on that line
     const top = wordEls[best].offsetTop;
     while (best > 0 && Math.abs(wordEls[best - 1].offsetTop - top) < 2) best--;
     return wordEls[best];
@@ -253,6 +347,7 @@ Thanks for watching, and we'll see you in the next video.`;
     pos = clamp(p, 0, scriptWords.length);
     listener.resetHeard();
     paintSaid();
+    updateListenerLang();
     if (scroll) scrollToPos();
   }
   function paintSaid() {
@@ -261,9 +356,10 @@ Thanks for watching, and we'll see you in the next video.`;
     else for (let i = n; i < saidUpTo; i++) wordEls[i].classList.remove("said");
     saidUpTo = n;
     const next = wordEls[Math.min(n, wordEls.length - 1)] || null;
-    if (curEl !== next) {
+    const want = S.mode === "voice" && running ? next : null;
+    if (curEl !== want) {
       if (curEl) curEl.classList.remove("cur");
-      curEl = S.mode === "voice" && running ? next : null;
+      curEl = want;
       if (curEl) curEl.classList.add("cur");
     }
   }
@@ -273,10 +369,11 @@ Thanks for watching, and we'll see you in the next video.`;
     if (layoutDirty) measure();
     target = offsetFor(wordEls[i]);
   }
-  let posSaveTimer = 0;
   function savePos() {
-    clearTimeout(posSaveTimer);
-    posSaveTimer = setTimeout(() => save(KEY_POS, { pos, offset: target, len: scriptText.length }), 500);
+    let c = charOfPos();
+    if (S.mode === "auto" && running) { const a = currentAnchorEl(); if (a) c = +a.dataset.c; }
+    cur().posChar = c;
+    saveLib();
   }
 
   function onHeard(words) {
@@ -289,6 +386,7 @@ Thanks for watching, and we'll see you in the next video.`;
       paintSaid();
       scrollToPos();
       savePos();
+      updateListenerLang();
       if (pos >= scriptWords.length) toast("End of script.", "", 2500);
     }
   }
@@ -299,20 +397,22 @@ Thanks for watching, and we'll see you in the next video.`;
 
   function createListener() {
     let rec = null, wanted = false, startedAt = 0, quickFails = 0, restartTimer = 0;
+    let lang = "en-US", switching = false;
     let carried = [];      // words heard in earlier recognition sessions (recent only)
     let ignore = 0;        // words of the current session to ignore (heard before a jump)
     let session = [];      // words heard in the current session
     let lastWordsAt = 0;
 
     function heardWords() { return carried.concat(session.slice(ignore)); }
+    const langShort = () => (lang.startsWith("es") ? "ES" : "EN");
 
     function build() {
       const r = new Recognition();
-      r.lang = "en-US";
+      r.lang = lang;
       r.continuous = true;
       r.interimResults = true;
       r.maxAlternatives = 1;
-      r.onstart = () => { startedAt = Date.now(); setHearing("Listening…", "idle"); };
+      r.onstart = () => { startedAt = Date.now(); setHearing(`Listening… (${LANG_NAMES[lang] || lang})`, "idle"); };
       r.onresult = (e) => {
         let text = "";
         for (let i = 0; i < e.results.length; i++) text += " " + e.results[i][0].transcript;
@@ -322,7 +422,7 @@ Thanks for watching, and we'll see you in the next video.`;
         lastWordsAt = Date.now();
         quickFails = 0;
         const shown = text.trim().split(/\s+/).slice(-12).join(" ");
-        setHearing(shown || "Listening…", "talking");
+        setHearing(`${langShort()} · ${shown}`, "talking");
         onHeard(heardWords());
       };
       r.onerror = (e) => {
@@ -346,8 +446,15 @@ Thanks for watching, and we'll see you in the next video.`;
           return;
         }
         if (err === "language-not-supported") {
-          toast("This browser can't recognize English speech.", "error", 7000);
-          wanted = false; stop("mic");
+          const fb = lang.startsWith("es") ? "es-US" : "en-US";
+          if (lang !== fb) {
+            langFallback[lang] = fb;
+            toast(`This browser can't listen in ${LANG_NAMES[lang] || lang}; using ${LANG_NAMES[fb]} instead.`, "warn", 6000);
+            lang = fb; // onend restarts with it
+          } else {
+            toast(`This browser can't recognize ${LANG_NAMES[lang]} speech.`, "error", 7000);
+            wanted = false; stop("mic");
+          }
         }
       };
       r.onend = () => {
@@ -355,7 +462,8 @@ Thanks for watching, and we'll see you in the next video.`;
         carried = carried.concat(session.slice(ignore)).slice(-12);
         session = []; ignore = 0;
         if (!wanted) { setHearing("Paused", "idle"); return; }
-        const quick = Date.now() - startedAt < 1500;
+        const quick = !switching && Date.now() - startedAt < 1500;
+        switching = false;
         quickFails = quick ? quickFails + 1 : 0;
         const delay = quickFails > 3 ? Math.min(4000, 400 * quickFails) : 60;
         clearTimeout(restartTimer);
@@ -374,7 +482,7 @@ Thanks for watching, and we'll see you in the next video.`;
         restartTimer = setTimeout(startRec, 500);
       }
     }
-    // Show "Listening…" again after a few seconds of silence.
+    // Drop the "talking" pulse after a few seconds of silence.
     setInterval(() => {
       if (wanted && lastWordsAt && Date.now() - lastWordsAt > 2500 && hearingEl.classList.contains("talking")) {
         hearingEl.classList.remove("talking");
@@ -383,8 +491,16 @@ Thanks for watching, and we'll see you in the next video.`;
 
     return {
       supported: !!Recognition,
+      get lang() { return lang; },
       start() { if (!Recognition) return false; wanted = true; quickFails = 0; startRec(); return true; },
       stop() { wanted = false; clearTimeout(restartTimer); try { rec && rec.abort(); } catch { } rec = null; },
+      /** Switch the listening language (restarts the recognizer if it's running). */
+      setLang(l) {
+        if (l === lang) return;
+        lang = l;
+        if (window.__prompterDebug) console.log("lang " + l);
+        if (wanted && rec) { switching = true; carried = []; try { rec.abort(); } catch { } }
+      },
       resetHeard() { carried = []; ignore = session.length; },
       /** For automated tests: feed text as if the recognizer heard it. */
       _feed(text) { session = M.tokenize(text); onHeard(heardWords()); },
@@ -401,19 +517,22 @@ Thanks for watching, and we'll see you in the next video.`;
   }
 
   // ---------------------------------------------------------------- start / stop
+  let sidewaysTipShown = false;
   async function start() {
-    if (!wordEls.length) { openPanel("scriptPanel"); return; }
+    if (!wordEls.length) { openEditor(0); return; }
+    if (S.mode === "voice" && !listener.supported) {
+      toast("This browser doesn't have speech recognition, so it can't follow your voice. Use Chrome, Edge or Safari, or switch to Auto mode.", "warn", 9000);
+      return;
+    }
+    landscapeForPrompting();
     if (S.mode === "voice") {
-      if (!listener.supported) {
-        toast("This browser doesn't have speech recognition, so it can't follow your voice. Use Chrome, Edge or Safari, or switch to Auto mode.", "warn", 9000);
-        return;
-      }
       // Start from the line on the reading band.
       const el = currentAnchorEl();
       if (el && !(tokenToEl[pos] !== undefined && Math.abs(offsetFor(wordEls[tokenToEl[pos]]) - target) < lineH)) {
         pos = elFirstToken[+el.dataset.i];
       }
       running = true;
+      listener.setLang(langAt(pos));
       listener.start();
       setHearing("Starting microphone…", "idle");
       paintSaid();
@@ -427,7 +546,7 @@ Thanks for watching, and we'll see you in the next video.`;
     keepAwake(true);
     scheduleHideBar();
   }
-  function stop(reason) {
+  function stop() {
     running = false;
     listener.stop();
     document.body.classList.remove("running");
@@ -435,10 +554,35 @@ Thanks for watching, and we'll see you in the next video.`;
     updateHearingVisibility();
     paintSaid();
     keepAwake(false);
+    try { screen.orientation && screen.orientation.unlock && screen.orientation.unlock(); } catch { }
     showBar();
     savePos();
   }
   function toggle() { running ? stop() : start(); }
+
+  /** On phones: go fullscreen and lock to landscape where the browser allows it (Android). */
+  function landscapeForPrompting() {
+    if (!coarse || !S.lockLandscape) return;
+    const lock = () => {
+      try {
+        const p = screen.orientation && screen.orientation.lock && screen.orientation.lock("landscape");
+        if (p && p.catch) p.catch(() => { });
+      } catch { }
+    };
+    const d = document, el = d.documentElement;
+    if (canFullscreen && !(d.fullscreenElement || d.webkitFullscreenElement)) {
+      try {
+        const p = (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+        if (p && p.then) p.then(lock, () => { }); else lock();
+      } catch { lock(); }
+    } else lock();
+    setTimeout(() => {
+      if (!sidewaysTipShown && window.innerHeight > window.innerWidth) {
+        sidewaysTipShown = true;
+        toast("Tip: turn your phone sideways for a wider view.", "", 3500);
+      }
+    }, 900);
+  }
 
   // ---------------------------------------------------------------- wake lock
   let wakeLock = null, wantAwake = false;
@@ -467,15 +611,16 @@ Thanks for watching, and we'll see you in the next video.`;
     clearTimeout(hideTimer);
     if (!running) return;
     hideTimer = setTimeout(() => {
-      if (running && !document.querySelector(".panel:not([hidden])") && !$("toolbar").matches(":hover")) document.body.classList.add("bar-hidden");
+      if (running && !document.querySelector(".panel:not([hidden])") && !$("toolbar").matches(":hover") &&
+        !$("toolbar").contains(document.activeElement)) document.body.classList.add("bar-hidden");
     }, 3000);
   }
   document.addEventListener("mousemove", (e) => { if (e.movementX || e.movementY) showBar(); });
   $("showBar").addEventListener("click", showBar);
 
-  // ---------------------------------------------------------------- pointer: tap to jump, drag to scroll
+  // ---------------------------------------------------------------- pointer: tap to jump, double-tap to edit, drag to scroll
   const flipV = () => S.mirror === "v" || S.mirror === "both";
-  let drag = null;
+  let drag = null, lastTap = { t: 0, el: null };
   stage.addEventListener("pointerdown", (e) => {
     drag = { x: e.clientX, y: e.clientY, startOffset: target, moved: false, id: e.pointerId };
     stage.setPointerCapture(e.pointerId);
@@ -493,11 +638,13 @@ Thanks for watching, and we'll see you in the next video.`;
     const wasDrag = drag.moved;
     drag = null;
     if (wasDrag) { afterManualMove(); return; }
-    // Tap: jump to the word under the finger.
     const hit = document.elementFromPoint(e.clientX, e.clientY);
     const w = hit && hit.closest && hit.closest(".w");
-    if (w) jumpToEl(w);
-    else showBar();
+    if (!w) { showBar(); return; }
+    const now = performance.now();
+    if (lastTap.el === w && now - lastTap.t < 400) { lastTap = { t: 0, el: null }; openEditor(+w.dataset.c); return; }
+    lastTap = { t: now, el: w };
+    jumpToEl(w);
   });
   stage.addEventListener("pointercancel", () => { drag = null; });
   stage.addEventListener("wheel", (e) => {
@@ -509,10 +656,10 @@ Thanks for watching, and we'll see you in the next video.`;
   }, { passive: false });
 
   function jumpToEl(el) {
-    const i = +el.dataset.i;
-    pos = elFirstToken[i];
+    pos = elFirstToken[+el.dataset.i];
     listener.resetHeard();
     paintSaid();
+    updateListenerLang();
     target = offsetFor(el);
     if (S.mode === "auto") offset = target; // auto mode jumps instantly so speed stays steady
     savePos();
@@ -520,6 +667,7 @@ Thanks for watching, and we'll see you in the next video.`;
 
   // ---------------------------------------------------------------- keyboard
   document.addEventListener("keydown", (e) => {
+    if (!editorEl.hidden) return; // the editor handles its own keys
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "textarea" || tag === "input" || tag === "select") {
       if (e.key === "Escape") closePanels();
@@ -539,6 +687,7 @@ Thanks for watching, and we'll see you in the next video.`;
       case "ArrowLeft": changeSpeed(-1); break;
       case "Home": goTop(); break;
       case "End": target = maxOffset; afterManualMove(); break;
+      case "e": case "E": openEditor(); break;
       case "m": case "M": cycleMirror(); break;
       case "f": case "F": toggleFullscreen(); break;
       case "+": case "=": changeSize(4); break;
@@ -571,82 +720,306 @@ Thanks for watching, and we'll see you in the next video.`;
   if (!canFullscreen) $("btnFull").hidden = true;
   function toggleFullscreen() {
     const d = document, el = d.documentElement;
-    if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
-    else if (canFullscreen) (el.requestFullscreen || el.webkitRequestFullscreen).call(el).catch?.(() => { });
+    try {
+      if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+      else if (canFullscreen) { const p = (el.requestFullscreen || el.webkitRequestFullscreen).call(el); if (p && p.catch) p.catch(() => { }); }
+    } catch { }
   }
 
-  // ---------------------------------------------------------------- panels
+  // ---------------------------------------------------------------- panels (settings, help)
   function openPanel(id) {
     closePanels();
     $(id).hidden = false;
     showBar();
-    if (id === "scriptPanel") { const ta = $("scriptInput"); ta.value = scriptText === SAMPLE ? "" : scriptText; ta.focus(); }
   }
   function closePanels() {
-    for (const p of document.querySelectorAll(".panel")) {
-      if (!p.hidden && p.id === "scriptPanel") commitScript();
-      p.hidden = true;
-    }
-  }
-  function commitScript() {
-    const v = $("scriptInput").value.replace(/\s+$/, "");
-    const next = v.trim() ? v : SAMPLE;
-    if (next === scriptText) return;
-    const wasRunning = running;
-    if (running) stop();
-    scriptText = next;
-    save(KEY_SCRIPT, next === SAMPLE ? "" : next);
-    renderScript();
-    measure();
-    pos = 0; offset = target = 0;
-    paintSaid();
-    savePos();
-    if (wasRunning) toast("Script updated. Press Start when you're ready.", "", 2500);
+    for (const p of document.querySelectorAll(".panel")) p.hidden = true;
   }
   for (const p of document.querySelectorAll(".panel")) {
     p.addEventListener("click", (e) => { if (e.target === p || e.target.closest("[data-close]")) closePanels(); });
   }
-  $("btnScript").addEventListener("click", () => openPanel("scriptPanel"));
   $("btnSettings").addEventListener("click", () => openPanel("settingsPanel"));
   $("btnHelp").addEventListener("click", () => openPanel("helpPanel"));
-  $("btnScriptDone").addEventListener("click", closePanels);
-  $("btnClear").addEventListener("click", () => { $("scriptInput").value = ""; $("scriptInput").focus(); });
   $("btnReset").addEventListener("click", () => {
-    const mode = S.mode;
-    Object.assign(S, DEFAULTS, { mode });
+    const keep = { mode: S.mode, lang: S.lang };
+    Object.assign(S, DEFAULTS, keep);
     applySettings();
     measure();
     scrollToPos();
   });
 
+  // ---------------------------------------------------------------- script editor
+  const editorEl = $("editor"), ta = $("scriptInput"), edScripts = $("edScripts"), edSaved = $("edSaved");
+  let ed = null; // { id, origText, origChar } — the script and spot the editor was opened on
+
+  function fillScriptList() {
+    edScripts.textContent = "";
+    const sorted = lib.scripts.slice().sort((a, b) => a.name.localeCompare(b.name));
+    for (const s of sorted) {
+      const o = document.createElement("option");
+      o.value = s.id; o.textContent = s.name;
+      edScripts.appendChild(o);
+    }
+    edScripts.value = cur().id;
+  }
+
+  function openEditor(atChar) {
+    if (running) stop();
+    closePanels();
+    const s = cur();
+    ed = { id: s.id, origText: cleanText(s.text), origChar: atChar == null ? charOfPos() : atChar };
+    fillScriptList();
+    ta.value = cleanText(s.text);
+    histReset();
+    edSaved.textContent = "Saved";
+    editorEl.hidden = false;
+    document.body.classList.add("editing");
+    fitEditor();
+    placeCaret(ed.origChar);
+  }
+  function closeEditor() {
+    if (editorEl.hidden) return;
+    flushSave();
+    histCommit();
+    const s = cur();
+    const text = cleanText(s.text);
+    let c;
+    if (ed && s.id === ed.id) c = adjustChar(ed.origText, text, ed.origChar);
+    else c = s.posChar || 0;
+    ta.blur();
+    editorEl.hidden = true;
+    document.body.classList.remove("editing");
+    ed = null;
+    loadCurrent(c);
+    savePos();
+  }
+
+  /** Where a character offset lands after an edit (so the prompter resumes at the same spot). */
+  function adjustChar(oldT, newT, c) {
+    if (oldT === newT) return c;
+    let p = 0;
+    const max = Math.min(oldT.length, newT.length);
+    while (p < max && oldT.charCodeAt(p) === newT.charCodeAt(p)) p++;
+    let q = 0;
+    while (q < max - p && oldT.charCodeAt(oldT.length - 1 - q) === newT.charCodeAt(newT.length - 1 - q)) q++;
+    if (c <= p) return c;
+    if (c >= oldT.length - q) return c + (newT.length - oldT.length);
+    return p; // the spot itself was edited: resume at the start of the change
+  }
+
+  function placeCaret(c) {
+    c = clamp(c || 0, 0, ta.value.length);
+    try { ta.focus({ preventScroll: true }); } catch { ta.focus(); }
+    ta.setSelectionRange(c, c);
+    scrollCaretIntoView();
+  }
+  /** Scroll the text area so the caret sits about a third of the way down. */
+  function scrollCaretIntoView() {
+    const cs = getComputedStyle(ta);
+    const m = document.createElement("div");
+    for (const p of ["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "paddingLeft", "paddingRight", "paddingTop", "borderLeftWidth", "borderRightWidth", "boxSizing", "tabSize"]) m.style[p] = cs[p];
+    m.style.position = "absolute"; m.style.visibility = "hidden"; m.style.whiteSpace = "pre-wrap"; m.style.overflowWrap = "break-word";
+    m.style.width = ta.clientWidth + "px";
+    m.textContent = ta.value.slice(0, ta.selectionStart);
+    const mark = document.createElement("span"); mark.textContent = "​"; m.appendChild(mark);
+    document.body.appendChild(m);
+    const top = mark.offsetTop;
+    m.remove();
+    ta.scrollTop = Math.max(0, top - ta.clientHeight / 3);
+  }
+
+  // Keep the editor above the on-screen keyboard (phones, landscape especially).
+  function fitEditor() {
+    if (editorEl.hidden) return;
+    const vv = window.visualViewport;
+    if (vv) {
+      editorEl.style.height = vv.height + "px";
+      editorEl.style.top = vv.offsetTop + "px";
+    } else { editorEl.style.height = ""; editorEl.style.top = ""; }
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", fitEditor);
+    window.visualViewport.addEventListener("scroll", fitEditor);
+  }
+
+  // Autosave while typing.
+  let saveTimer = 0;
+  function scheduleSave() {
+    edSaved.textContent = "Saving…";
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flushSave, 400);
+  }
+  function flushSave() {
+    clearTimeout(saveTimer);
+    const s = cur();
+    const v = cleanText(ta.value);
+    if (!editorEl.hidden && s.text !== v) { s.text = v; s.updated = Date.now(); }
+    saveLib(true);
+    edSaved.textContent = "Saved";
+  }
+
+  // Undo / redo (our own history, so the buttons work on phones too).
+  let hist = [], hi = 0, histTimer = 0;
+  function histReset() { hist = [{ v: ta.value, s: ta.selectionStart }]; hi = 0; updateUndoButtons(); }
+  function histCommit() {
+    clearTimeout(histTimer);
+    if (hist[hi] && hist[hi].v === ta.value) return;
+    hist = hist.slice(0, hi + 1);
+    hist.push({ v: ta.value, s: ta.selectionStart });
+    if (hist.length > 300) hist.shift();
+    hi = hist.length - 1;
+    updateUndoButtons();
+  }
+  function histApply(st) {
+    ta.value = st.v;
+    ta.setSelectionRange(st.s, st.s);
+    scrollCaretIntoView();
+    scheduleSave();
+    updateUndoButtons();
+  }
+  function undo() { histCommit(); if (hi > 0) { hi--; histApply(hist[hi]); } }
+  function redo() { histCommit(); if (hi < hist.length - 1) { hi++; histApply(hist[hi]); } }
+  function updateUndoButtons() {
+    $("edUndo").disabled = hi <= 0 && (!hist[hi] || hist[hi].v === ta.value);
+    $("edRedo").disabled = hi >= hist.length - 1;
+  }
+  ta.addEventListener("input", () => {
+    clearTimeout(histTimer);
+    histTimer = setTimeout(histCommit, 700);
+    $("edUndo").disabled = false;
+    scheduleSave();
+  });
+  ta.addEventListener("keydown", (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.shiftKey && (e.key === "z" || e.key === "Z")) { e.preventDefault(); undo(); }
+    else if (mod && ((e.shiftKey && (e.key === "z" || e.key === "Z")) || e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); }
+    else if (e.key === "Escape") { e.preventDefault(); closeEditor(); }
+  });
+  editorEl.addEventListener("keydown", (e) => { if (e.key === "Escape" && e.target !== ta) { e.preventDefault(); closeEditor(); } });
+
+  function insertText(t) {
+    histCommit();
+    const s = ta.selectionStart, e = ta.selectionEnd;
+    ta.focus();
+    ta.setRangeText(cleanText(t), s, e, "end");
+    histCommit();
+    scheduleSave();
+  }
+  $("edUndo").addEventListener("click", undo);
+  $("edRedo").addEventListener("click", redo);
+  $("edPaste").addEventListener("click", async () => {
+    try {
+      const t = await navigator.clipboard.readText();
+      if (t) insertText(t); else toast("The clipboard is empty.", "", 2000);
+    } catch {
+      toast("This browser didn't allow pasting from the button. Press and hold in the text, then choose Paste (or Ctrl+V).", "warn", 6000);
+    }
+  });
+  $("edDone").addEventListener("click", closeEditor);
+
+  function switchScript(id) {
+    flushSave();
+    histCommit();
+    lib.currentId = id;
+    saveLib(true);
+    const s = cur();
+    ed = { id: s.id, origText: cleanText(s.text), origChar: s.posChar || 0 };
+    ta.value = cleanText(s.text);
+    histReset();
+    fillScriptList();
+    placeCaret(ed.origChar);
+  }
+  edScripts.addEventListener("change", () => switchScript(edScripts.value));
+  function addScript(name, text) {
+    const s = { id: newId(), name, text: cleanText(text || ""), posChar: 0, updated: Date.now() };
+    lib.scripts.push(s);
+    saveLib(true);
+    return s;
+  }
+  function uniqueName(base) {
+    const names = new Set(lib.scripts.map((s) => s.name));
+    if (!names.has(base)) return base;
+    let n = 2;
+    while (names.has(`${base} ${n}`)) n++;
+    return `${base} ${n}`;
+  }
+  $("edNew").addEventListener("click", () => {
+    const name = window.prompt("Name for the new script:", uniqueName("New script"));
+    if (name == null) return;
+    const s = addScript(uniqueName(name.trim() || "New script"), "");
+    switchScript(s.id);
+  });
+  $("edRename").addEventListener("click", () => {
+    const s = cur();
+    const name = window.prompt("Rename this script:", s.name);
+    if (name == null || !name.trim() || name.trim() === s.name) return;
+    s.name = uniqueName(name.trim());
+    saveLib(true);
+    fillScriptList();
+  });
+  $("edDelete").addEventListener("click", () => {
+    const s = cur();
+    if (!window.confirm(`Delete "${s.name}"? This can't be undone.`)) return;
+    lib.scripts = lib.scripts.filter((x) => x.id !== s.id);
+    if (!lib.scripts.length) lib.scripts.push({ id: newId(), name: "New script", text: "", posChar: 0, updated: Date.now() });
+    lib.currentId = lib.scripts[0].id;
+    saveLib(true);
+    const n = cur();
+    ed = { id: n.id, origText: cleanText(n.text), origChar: n.posChar || 0 };
+    ta.value = cleanText(n.text);
+    histReset();
+    fillScriptList();
+    toast(`Deleted "${s.name}".`, "", 2500);
+  });
+  $("edExport").addEventListener("click", async () => {
+    flushSave();
+    const s = cur();
+    const fileName = (s.name.replace(/[\\/:*?"<>|]+/g, "").trim() || "script") + ".txt";
+    const blob = new Blob([cleanText(s.text).replace(/\n/g, "\r\n")], { type: "text/plain" });
+    try {
+      const file = new File([blob], fileName, { type: "text/plain" });
+      if (coarse && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: s.name });
+        return;
+      }
+    } catch (err) { if (err && err.name === "AbortError") return; }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+
   $("fileInput").addEventListener("change", async (e) => {
     const file = e.target.files && e.target.files[0];
     e.target.value = "";
-    if (file) await openFile(file);
+    if (file) await importFile(file);
   });
-  async function openFile(file) {
+  async function importFile(file) {
     try {
       let text;
       if (/\.docx$/i.test(file.name)) text = await window.docxToText(await file.arrayBuffer());
       else if (/\.doc$/i.test(file.name)) throw new Error("Old .doc files can't be opened. In Word, use Save As → Word Document (.docx) or Plain Text (.txt).");
       else text = await file.text();
-      $("scriptInput").value = text;
-      toast(`Opened ${file.name}`, "", 2000);
+      if (editorEl.hidden) openEditor(0);
+      const s = addScript(uniqueName(file.name.replace(/\.[^.]+$/, "") || "Imported script"), text);
+      switchScript(s.id);
+      placeCaret(0);
+      toast(`Imported "${s.name}".`, "", 2500);
     } catch (err) {
       toast(err.message || "Couldn't open that file.", "error", 7000);
     }
   }
-  // Drag a file onto the window.
+  // Drag a file onto the window to import it.
   window.addEventListener("dragover", (e) => { e.preventDefault(); });
   window.addEventListener("drop", async (e) => {
     e.preventDefault();
     const file = e.dataTransfer && e.dataTransfer.files[0];
-    if (!file) return;
-    openPanel("scriptPanel");
-    await openFile(file);
+    if (file) await importFile(file);
   });
 
   // ---------------------------------------------------------------- toolbar buttons
+  $("btnEdit").addEventListener("click", () => openEditor());
   $("btnPlay").addEventListener("click", toggle);
   $("modeVoice").addEventListener("click", () => setMode("voice"));
   $("modeAuto").addEventListener("click", () => setMode("auto"));
@@ -683,12 +1056,13 @@ Thanks for watching, and we'll see you in the next video.`;
   }
   toastEl.addEventListener("click", () => { toastEl.hidden = true; });
 
-  // ---------------------------------------------------------------- resize
+  // ---------------------------------------------------------------- resize / rotate
   window.addEventListener("resize", () => {
     const anchor = currentAnchorEl();
     updateReadingPx();
     measure();
     if (anchor) offset = target = offsetFor(anchor);
+    fitEditor();
   });
 
   // ---------------------------------------------------------------- install / offline
@@ -697,19 +1071,12 @@ Thanks for watching, and we'll see you in the next video.`;
   }
   const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   $("installHint").innerHTML = isIOS
-    ? "<b>Add to Home Screen:</b> tap Share, then “Add to Home Screen”. It then opens full screen like an app."
+    ? "<b>Add to Home Screen:</b> tap Share, then “Add to Home Screen”. It then opens full screen like an app. iPhone can't lock the screen sideways from a web page, so turn off Portrait Orientation Lock and hold the phone sideways."
     : "<b>Install:</b> in Chrome or Edge, use the install icon in the address bar (or menu → Install / Add to Home screen).";
 
   // ---------------------------------------------------------------- boot
-  renderScript();
   applySettings();
-  measure();
-  const savedPos = load(KEY_POS, null);
-  if (savedPos && savedPos.len === scriptText.length) {
-    pos = clamp(savedPos.pos | 0, 0, scriptWords.length);
-    offset = target = clamp(savedPos.offset || 0, 0, maxOffset);
-    paintSaid();
-  }
+  loadCurrent(cur().posChar || 0);
   if (!listener.supported && S.mode === "voice") {
     setTimeout(() => toast("This browser can't follow your voice (no speech recognition). Use Chrome, Edge or Safari, or use Auto mode.", "warn", 8000), 400);
   }
@@ -718,6 +1085,7 @@ Thanks for watching, and we'll see you in the next video.`;
   // Test hook (used by automated tests only).
   window.__prompter = {
     feed: (t) => listener._feed(t), get pos() { return pos; }, get offset() { return offset; }, get target() { return target; },
-    words: () => scriptWords.slice(), setRunning(v) { running = v; }, settings: S,
+    words: () => scriptWords.slice(), setRunning(v) { running = v; paintSaid(); }, settings: S,
+    get lang() { return listener.lang; }, langAt: (p) => langAt(p), library: () => JSON.parse(JSON.stringify(lib)),
   };
 })();
