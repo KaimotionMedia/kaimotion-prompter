@@ -66,18 +66,15 @@ python -m http.server 5310
 Then open http://localhost:5310 in Chrome. (Opening `index.html` by double-clicking works for Auto
 mode, but browsers block the microphone that way.)
 
-## Put it online (free, GitHub Pages)
+## Online
 
-Not done yet: it needs your OK to create the repository. Once you say so:
+Live at **https://kaimotionmedia.github.io/kaimotion-prompter/** (GitHub Pages, from the `main`
+branch of `KaimotionMedia/kaimotion-prompter`). The repo is public, but scripts are never uploaded:
+they stay in the browser of each device. Send that link to the talent; on a phone they can **Add to
+Home Screen** (Safari: Share → Add to Home Screen; Chrome: menu → Install app) and it opens full
+screen like an app, and works offline in Auto mode.
 
-1. Create a public repo, e.g. `KaimotionMedia/prompter`, and push this folder to it.
-2. On GitHub: repo → **Settings** → **Pages** → Source: **Deploy from a branch** → Branch: `main`,
-   folder `/ (root)` → Save.
-3. After a minute it's live at `https://kaimotionmedia.github.io/prompter/`. Send that link to the
-   talent; on a phone they can **Add to Home Screen** (Safari: Share → Add to Home Screen; Chrome:
-   menu → Install app) and it opens full screen like an app, and works offline in Auto mode.
-
-**Updating it later:** change the files, bump `CACHE` in `sw.js` (e.g. `kprompter-v2`), push. Phones
+**Updating it later:** change the files, bump `CACHE` in `sw.js` (e.g. `kprompter-v3`), push. Phones
 that already have it pick up the new version the second time they open it.
 
 ## For developers
