@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Kaimotion Prompter</title>
+  <meta name="description" content="A teleprompter that follows your voice. Works in the browser on any device.">
+  <meta name="theme-color" content="#000000">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Prompter">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- The prompter view. Everything inside #stage is mirrored for beam-splitter glass. -->
+  <div id="stage" aria-live="off">
+    <div id="text"></div>
+    <div id="band" aria-hidden="true"></div>
+    <div id="arrow" aria-hidden="true"></div>
+  </div>
+
+  <!-- Toolbar: never mirrored. -->
+  <header id="toolbar">
+    <button id="btnScript" class="tb" title="Edit the script">
+      <svg viewBox="0 0 24 24"><path d="M5 3h10l4 4v14H5z M14 3v5h5 M8 12h8 M8 16h8"/></svg><span>Script</span>
+    </button>
+    <div class="seg" role="group" aria-label="How the script moves">
+      <button id="modeVoice" class="segbtn" aria-pressed="true" title="Follow my voice">
+        <svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z M5 11a7 7 0 0 0 14 0 M12 18v3"/></svg><span>Voice</span>
+      </button>
+      <button id="modeAuto" class="segbtn" aria-pressed="false" title="Scroll at a set speed">
+        <svg viewBox="0 0 24 24"><path d="M12 4v14 M6 12l6 6 6-6"/></svg><span>Auto</span>
+      </button>
+    </div>
+    <button id="btnPlay" class="tb primary" title="Start / pause (Space)">
+      <svg class="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></svg>
+      <svg class="i-pause" viewBox="0 0 24 24"><path d="M7 4h4v16H7z M14 4h4v16h-4z"/></svg>
+      <span id="playLabel">Start</span>
+    </button>
+    <div id="speedBox" class="stepper" title="Scroll speed (Left / Right arrows)">
+      <button id="speedDown" aria-label="Slower">&minus;</button>
+      <span id="speedVal">3</span>
+      <button id="speedUp" aria-label="Faster">+</button>
+    </div>
+    <div class="stepper" title="Text size">
+      <button id="sizeDown" aria-label="Smaller text">A&minus;</button>
+      <button id="sizeUp" aria-label="Bigger text">A+</button>
+    </div>
+    <button id="btnMirror" class="tb" title="Mirror for teleprompter glass (M)">
+      <svg viewBox="0 0 24 24"><path d="M12 3v18 M9 7L4 12l5 5z M15 7l5 5-5 5z"/></svg><span id="mirrorLabel">Mirror: off</span>
+    </button>
+    <span class="spacer"></span>
+    <button id="btnTop" class="tb icon" title="Back to the top (Home)">
+      <svg viewBox="0 0 24 24"><path d="M5 4h14 M12 20V8 M6 14l6-6 6 6"/></svg>
+    </button>
+    <button id="btnSettings" class="tb icon" title="Settings">
+      <svg viewBox="0 0 24 24"><path d="M4 7h10 M18 7h2 M4 17h4 M12 17h8 M14 4v6 M8 14v6"/></svg>
+    </button>
+    <button id="btnHelp" class="tb icon" title="How to use">
+      <svg viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14 M12 17.5v.01"/></svg>
+    </button>
+    <button id="btnFull" class="tb icon" title="Fullscreen (F)">
+      <svg viewBox="0 0 24 24"><path d="M4 9V4h5 M15 4h5v5 M20 15v5h-5 M9 20H4v-5"/></svg>
+    </button>
+  </header>
+
+  <button id="showBar" title="Show controls" aria-label="Show controls">
+    <svg viewBox="0 0 24 24"><path d="M5 12h.01 M12 12h.01 M19 12h.01"/></svg>
+  </button>
+
+  <!-- What the microphone is hearing (operator view, not mirrored). -->
+  <div id="hearing" hidden><span class="dot"></span><span id="hearingText">Listening…</span></div>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- Script panel -->
+  <section id="scriptPanel" class="panel" hidden aria-label="Script">
+    <div class="panel-card wide">
+      <div class="panel-head">
+        <h2>Script</h2>
+        <button class="close" data-close aria-label="Close">&times;</button>
+      </div>
+      <textarea id="scriptInput" spellcheck="true" placeholder="Paste or type your script here…"></textarea>
+      <p class="hint">Words in [square brackets] show in yellow and aren't read, so use them for notes like [PAUSE] or [SMILE].</p>
+      <div class="row">
+        <label class="btn"><input id="fileInput" type="file" accept=".txt,.text,.md,.docx,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>Open file (.txt / .docx)</label>
+        <button id="btnClear" class="btn ghost">Clear</button>
+        <span class="spacer"></span>
+        <button id="btnScriptDone" class="btn primary">Done</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Settings panel -->
+  <section id="settingsPanel" class="panel" hidden aria-label="Settings">
+    <div class="panel-card">
+      <div class="panel-head">
+        <h2>Settings</h2>
+        <button class="close" data-close aria-label="Close">&times;</button>
+      </div>
+      <div class="grid">
+        <label>Text size <output data-for="fontSize"></output><input type="range" id="fontSize" min="20" max="200" step="2"></label>
+        <label>Line spacing <output data-for="lineHeight"></output><input type="range" id="lineHeight" min="1" max="2.4" step="0.05"></label>
+        <label>Side margins <output data-for="margin"></output><input type="range" id="margin" min="0" max="35" step="1"></label>
+        <label>Reading line height <output data-for="readingLine"></output><input type="range" id="readingLine" min="10" max="60" step="1"></label>
+        <label>Auto-scroll speed <output data-for="speed"></output><input type="range" id="speed" min="1" max="20" step="1"></label>
+        <label>Font
+          <select id="font">
+            <option value="sans">Clean (sans-serif)</option>
+            <option value="arial">Arial / Helvetica</option>
+            <option value="serif">Book (serif)</option>
+            <option value="rounded">Rounded</option>
+            <option value="mono">Typewriter</option>
+          </select>
+        </label>
+        <label>Reading marker
+          <select id="marker">
+            <option value="both">Band and arrow</option>
+            <option value="band">Band only</option>
+            <option value="arrow">Arrow only</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <label>Mirror
+          <select id="mirror">
+            <option value="none">Off</option>
+            <option value="h">Flip left-right (usual for glass)</option>
+            <option value="v">Flip upside down</option>
+            <option value="both">Flip both</option>
+          </select>
+        </label>
+        <label class="color">Text color <input type="color" id="textColor"></label>
+        <label class="color">Background <input type="color" id="bgColor"></label>
+        <label class="color">Spoken words <input type="color" id="spokenColor"></label>
+        <label class="color">Marker color <input type="color" id="markerColor"></label>
+        <label class="check"><input type="checkbox" id="caps"> ALL CAPS</label>
+        <label class="check"><input type="checkbox" id="centerText"> Center the text</label>
+        <label class="check"><input type="checkbox" id="showHearing"> Show what the mic hears</label>
+        <label class="check"><input type="checkbox" id="dimSpoken"> Gray out words already spoken</label>
+      </div>
+      <div class="row">
+        <button id="btnReset" class="btn ghost">Reset to defaults</button>
+        <span class="spacer"></span>
+        <button class="btn primary" data-close>Done</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Help panel -->
+  <section id="helpPanel" class="panel" hidden aria-label="How to use">
+    <div class="panel-card">
+      <div class="panel-head">
+        <h2>How to use</h2>
+        <button class="close" data-close aria-label="Close">&times;</button>
+      </div>
+      <div class="help">
+        <ol>
+          <li><b>Script</b>: paste your script, or open a .txt or Word (.docx) file.</li>
+          <li>Choose <b>Voice</b> (the script follows you as you talk) or <b>Auto</b> (it scrolls at a set speed).</li>
+          <li>Press <b>Start</b>. For Voice, allow the microphone the first time.</li>
+          <li>Read the line on the band. Ad-lib, pause or skip a line: it waits and catches up.</li>
+          <li>Tap or click any word to jump there. Drag or use the mouse wheel to scroll by hand.</li>
+        </ol>
+        <p><b>Teleprompter glass:</b> use <b>Mirror</b>. "Flip left-right" is the usual setting for a
+          beam-splitter rig. Use "Flip upside down" or "Both" if your screen sits the other way.</p>
+        <p><b>Keys:</b> Space = start/pause · ↑ ↓ = nudge a line · ← → = slower/faster ·
+          Page Up/Down = a screen · Home = top · M = mirror · F = fullscreen · + / − = text size.
+          Presentation clickers work too.</p>
+        <p><b>Voice follow</b> works in Chrome, Edge and Safari (including iPhone and iPad), not Firefox.
+          Chrome and Edge need an internet connection for it; Auto mode works offline.</p>
+        <p id="installHint"></p>
+      </div>
+    </div>
+  </section>
+
+  <script src="matcher.js"></script>
+  <script src="docx.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
