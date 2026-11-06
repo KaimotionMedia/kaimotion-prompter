@@ -21,6 +21,7 @@
     <div id="text"></div>
     <div id="band" aria-hidden="true"></div>
     <div id="arrow" aria-hidden="true"></div>
+    <div id="fumble" aria-hidden="true" hidden></div>
   </div>
 
   <!-- Toolbar: never mirrored. -->
@@ -115,8 +116,10 @@
         <label>Text size <output data-for="fontSize"></output><input type="range" id="fontSize" min="20" max="200" step="2"></label>
         <label>Line spacing <output data-for="lineHeight"></output><input type="range" id="lineHeight" min="1" max="2.4" step="0.05"></label>
         <label>Side margins <output data-for="margin"></output><input type="range" id="margin" min="0" max="35" step="1"></label>
-        <label>Reading line height <output data-for="readingLine"></output><input type="range" id="readingLine" min="10" max="60" step="1"></label>
+        <label>Reading line height <output data-for="readingLine"></output><input type="range" id="readingLine" min="2" max="60" step="1"></label>
         <label>Auto-scroll speed <output data-for="speed"></output><input type="range" id="speed" min="1" max="20" step="1"></label>
+        <label>Fumble timer <output data-for="fumbleSecs"></output><input type="range" id="fumbleSecs" min="0" max="10" step="1"></label>
+        <label>Fumble timer visibility <output data-for="fumbleOpacity"></output><input type="range" id="fumbleOpacity" min="5" max="60" step="5"></label>
         <label>Font
           <select id="font">
             <option value="sans">Clean (sans-serif)</option>
@@ -150,6 +153,7 @@
         <label class="check"><input type="checkbox" id="centerText"> Center the text</label>
         <label class="check"><input type="checkbox" id="showHearing"> Show what the mic hears</label>
         <label class="check"><input type="checkbox" id="dimSpoken"> Gray out words already spoken</label>
+        <label class="check"><input type="checkbox" id="markMisses"> Turn misheard words red</label>
         <label class="check"><input type="checkbox" id="lockLandscape"> Phones: go full screen and turn sideways when I press Start</label>
       </div>
       <div class="row">
@@ -173,7 +177,9 @@
           <li>Choose <b>Voice</b> (the script follows you as you talk) or <b>Auto</b> (it scrolls at a set speed).</li>
           <li>Pick the language: <b>Auto</b> guesses English or Spanish from the script; or choose one. Your choice wins.</li>
           <li>Press <b>Start</b>. For Voice, allow the microphone the first time.</li>
-          <li>Read the line on the band. Ad-lib, pause or skip a line: it waits and catches up.</li>
+          <li>Read the line on the band at the top. Ad-lib, pause or skip a line: it waits and catches up.</li>
+          <li>A word the mic heard wrong turns <b style="color:#ff5a5a">red</b> until you read it again clearly.</li>
+          <li><b>Fumble timer:</b> if you stumble and then stop talking, a faint countdown appears. When it runs out, the prompter goes back to the start of that paragraph so you can retake it. Start talking or tap the screen to cancel it. Change the time (or turn it off) in Settings.</li>
           <li>Tap a word to jump there. Double-tap a word to edit the script right there; press <b>Prompt</b> to come back to the same spot.</li>
         </ol>
         <p><b>Spanish and English in one script:</b> put <b>[ES]</b> on its own line before the Spanish part and <b>[EN]</b> before the English part. The prompter switches the listening language when the reader gets there. It listens to one language at a time.</p>

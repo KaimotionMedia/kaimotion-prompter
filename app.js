@@ -14,7 +14,7 @@
     fontSize: Math.round(clamp(Math.min(window.innerWidth / 16, window.innerHeight / 7.5), 30, 96)),
     lineHeight: 1.4,
     margin: window.innerWidth < 1000 ? 5 : 10,
-    readingLine: 33,
+    readingLine: 2,
     speed: 4,
     font: "sans",
     marker: "both",
@@ -28,6 +28,9 @@
     showHearing: true,
     dimSpoken: true,
     lockLandscape: true,
+    markMisses: true,
+    fumbleSecs: 5,
+    fumbleOpacity: 10,
     mode: "voice",
     lang: "auto",
   };
@@ -57,6 +60,8 @@ Thanks for watching, and we'll see you in the next video.`;
   }
 
   const S = Object.assign({}, DEFAULTS, load(KEY_SETTINGS, {}));
+  // v2: the reading line moved to the top of the screen (it used to sit a third of the way down).
+  if (S.settingsVersion !== 2) { S.readingLine = DEFAULTS.readingLine; S.settingsVersion = 2; }
 
   // ---------------------------------------------------------------- script library (saved on this device)
   const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -87,18 +92,23 @@ Thanks for watching, and we'll see you in the next video.`;
   let tokenToEl = [];    // matcher token index -> index in wordEls
   let elFirstToken = []; // wordEls index -> first matcher token index
   let tokenLang = [];    // matcher token index -> "es" / "en" from an [ES]/[EN] tag, or null
+  let wordPara = [];     // wordEls index -> paragraph number
+  let paraFirstEl = [];  // paragraph number -> first wordEls index in it
   let detectedFamily = "en";
   const LANG_TAG = /^\[\s*(es|esp|espa[ñn]ol|spanish|en|eng|english|ingl[ée]s)\s*\]$/i;
 
   function renderScript() {
     const text = cleanText(cur().text);
     textEl.textContent = "";
-    wordEls = []; scriptWords = []; tokenToEl = []; elFirstToken = []; tokenLang = [];
+    wordEls = []; scriptWords = []; tokenToEl = []; elFirstToken = []; tokenLang = []; wordPara = []; paraFirstEl = [];
+    let para = -1;
     let section = null;
     let lineStart = 0;
     let plain = "", untagged = "";
     for (const line of text.split("\n")) {
+      if (!line.trim()) { lineStart += line.length + 1; continue; } // blank lines: the paragraph gap does it
       const p = document.createElement("p");
+      para++;
       let off = lineStart;
       for (const part of line.split(/(\[[^\]]*\])/)) {
         if (!part) continue;
@@ -128,6 +138,8 @@ Thanks for watching, and we'll see you in the next video.`;
           span.dataset.i = ei;
           span.dataset.c = off;
           wordEls.push(span);
+          wordPara.push(para);
+          if (paraFirstEl[para] === undefined) paraFirstEl[para] = ei;
           elFirstToken.push(scriptWords.length);
           for (const t of tokens) { scriptWords.push(t); tokenToEl.push(ei); tokenLang.push(section); }
           p.appendChild(span);
@@ -215,7 +227,7 @@ Thanks for watching, and we'll see you in the next video.`;
     r.setProperty("--spoken", S.spokenColor);
     r.setProperty("--marker", S.markerColor);
     updateReadingPx();
-    textEl.className = `font-${S.font}` + (S.caps ? " caps" : "") + (S.centerText ? " center" : "") + (S.dimSpoken ? " dim" : "");
+    textEl.className = `font-${S.font}` + (S.caps ? " caps" : "") + (S.centerText ? " center" : "") + (S.dimSpoken ? " dim" : "") + (S.markMisses ? " marks" : "");
     stage.className = `marker-${S.marker}` + (S.mirror !== "none" ? ` mirror-${S.mirror}` : "");
     $("mirrorLabel").textContent = "Mirror: " + ({ none: "off", h: "left-right", v: "upside down", both: "both" })[S.mirror];
     $("btnMirror").classList.toggle("primary", S.mirror !== "none");
@@ -225,10 +237,17 @@ Thanks for watching, and we'll see you in the next video.`;
     $("modeVoice").setAttribute("aria-pressed", S.mode === "voice");
     $("modeAuto").setAttribute("aria-pressed", S.mode === "auto");
     document.querySelector('meta[name="theme-color"]').content = S.bgColor;
+    r.setProperty("--fumble-opacity", S.fumbleOpacity / 100);
+    // Controls sit on the side away from the reading line (it's at the bottom when flipped upside down).
+    document.body.classList.toggle("bar-top", S.mirror === "v" || S.mirror === "both");
+    updateBarH();
     syncSettingsForm();
     updateHearingVisibility();
     layoutDirty = true;
     save(KEY_SETTINGS, S);
+  }
+  function updateBarH() {
+    document.documentElement.style.setProperty("--bar-h", $("toolbar").offsetHeight + "px");
   }
   function updateReadingPx() {
     document.documentElement.style.setProperty("--reading-px", readingPx() + "px");
@@ -236,8 +255,12 @@ Thanks for watching, and we'll see you in the next video.`;
 
   const FORM_KEYS = ["fontSize", "lineHeight", "margin", "readingLine", "speed", "font", "marker", "mirror",
     "textColor", "bgColor", "spokenColor", "markerColor", "caps", "centerText", "showHearing", "dimSpoken",
-    "lockLandscape", "lang"];
-  const FORMAT = { fontSize: (v) => v + " px", lineHeight: (v) => Number(v).toFixed(2), margin: (v) => v + "%", readingLine: (v) => v + "% down", speed: (v) => v };
+    "lockLandscape", "lang", "markMisses", "fumbleSecs", "fumbleOpacity"];
+  const FORMAT = {
+    fontSize: (v) => v + " px", lineHeight: (v) => Number(v).toFixed(2), margin: (v) => v + "%",
+    readingLine: (v) => (v <= 2 ? "top" : v + "% down"), speed: (v) => v,
+    fumbleSecs: (v) => (v ? v + " s" : "off"), fumbleOpacity: (v) => v + "%",
+  };
   function syncSettingsForm() {
     for (const k of FORM_KEYS) {
       const el = $(k);
@@ -318,6 +341,7 @@ Thanks for watching, and we'll see you in the next video.`;
       if (Math.abs(target - offset) < 0.3) offset = target;
     }
     textEl.style.transform = `translate3d(0, ${-Math.round(offset * 10) / 10}px, 0)`;
+    if (stage.scrollTop || stage.scrollLeft) { stage.scrollTop = 0; stage.scrollLeft = 0; } // the browser must never scroll the stage itself
     requestAnimationFrame(frame);
   }
   function autoPxPerSec() { return S.speed * lineH * 0.1; } // speed 4 = about 0.4 lines a second
@@ -346,6 +370,7 @@ Thanks for watching, and we'll see you in the next video.`;
   function setVoicePos(p, scroll) {
     pos = clamp(p, 0, scriptWords.length);
     listener.resetHeard();
+    resetFumble();
     paintSaid();
     updateListenerLang();
     if (scroll) scrollToPos();
@@ -376,20 +401,102 @@ Thanks for watching, and we'll see you in the next video.`;
     saveLib();
   }
 
-  function onHeard(words) {
+  function onHeard(words, info) {
     if (S.mode !== "voice" || !running) return;
+    if (info && info.changed) {
+      lastSpeechAt = Date.now();
+      fumbleArmed = true;
+      if (countdown) hideCountdown();
+    }
     if (performance.now() < manualUntil) return;
     const r = M.locate(scriptWords, words, pos);
+    const oldPos = pos;
     if (r.moved) {
       if (window.__prompterDebug) console.log(`move ${pos} -> ${r.pos} score=${r.score.toFixed(2)} heard="${words.slice(-10).join(" ")}"`);
       pos = r.pos;
+      markCount = listener.count;
       paintSaid();
       scrollToPos();
       savePos();
       updateListenerLang();
       if (pos >= scriptWords.length) toast("End of script.", "", 2500);
     }
+    markMisses(words, r.moved && r.pos - oldPos > 3 ? oldPos : -1);
   }
+
+  // ---------------------------------------------------------------- misheard words (red until read clearly)
+  function markMisses(words, jumpedFrom) {
+    const res = M.judge(scriptWords, words, pos);
+    // After a jump ahead (a skipped line), words around the old spot were skipped, not misread:
+    // clear marks the matcher may have left there while it was catching up.
+    if (jumpedFrom >= 0) {
+      const bad = new Set(res.filter((x) => !x.ok).map((x) => tokenToEl[x.j]));
+      const a = tokenToEl[Math.max(0, jumpedFrom - 6)], b = pos >= scriptWords.length ? wordEls.length : tokenToEl[pos];
+      for (let i = a; i < b; i++) if (!bad.has(i)) wordEls[i].classList.remove("miss");
+    }
+    for (const { j, ok } of res) {
+      const el = wordEls[tokenToEl[j]];
+      if (!el) continue;
+      el.classList.toggle("miss", !ok);
+      if (ok) timerUsed.delete(el);
+    }
+  }
+
+  // ---------------------------------------------------------------- fumble timer
+  // After a fumble (a red word, or words that aren't in the script) the reader goes quiet:
+  // a faint countdown appears, then the prompter goes back to the start of that paragraph.
+  const fumbleEl = $("fumble");
+  let markCount = 0;      // listener word count at the last move / jump
+  let lastSpeechAt = 0;
+  let fumbleArmed = false; // something was said since the last jump / cancel
+  let countdown = null;   // { deadline, el }
+  // Each red word starts the timer only once (until it's read clearly), so a name the phone never
+  // gets right can't keep sending the reader back.
+  const timerUsed = new WeakSet();
+  function resetFumble() {
+    markCount = listener.count;
+    fumbleArmed = false;
+    if (countdown) hideCountdown();
+  }
+  function hideCountdown() { countdown = null; fumbleEl.hidden = true; }
+  function fumbleTarget() {
+    if (!wordEls.length) return null;
+    const curI = pos >= scriptWords.length ? wordEls.length : tokenToEl[pos];
+    // A red word already passed in this paragraph (or the one just finished).
+    const paras = new Set([wordPara[curI], wordPara[curI - 1]].filter((x) => x !== undefined));
+    for (let i = curI - 1; i >= 0 && paras.has(wordPara[i]); i--) {
+      if (S.markMisses && wordEls[i].classList.contains("miss") && !timerUsed.has(wordEls[i])) {
+        timerUsed.add(wordEls[i]);
+        return wordEls[paraFirstEl[wordPara[i]]];
+      }
+    }
+    // Words that didn't match the script since the last move (a short stumble, not a long ad-lib).
+    const extra = listener.count - markCount;
+    if (curI < wordEls.length && extra >= 2 && extra <= 12) return wordEls[paraFirstEl[wordPara[curI]]];
+    return null;
+  }
+  setInterval(() => {
+    if (!running || S.mode !== "voice" || !S.fumbleSecs) { if (countdown) hideCountdown(); return; }
+    const now = Date.now();
+    if (countdown) {
+      const left = countdown.deadline - now;
+      if (left <= 0) {
+        const el = countdown.el;
+        hideCountdown();
+        if (window.__prompterDebug) console.log("fumble: back to paragraph start", el.textContent);
+        jumpToEl(el);
+        return;
+      }
+      fumbleEl.textContent = Math.ceil(left / 1000);
+      return;
+    }
+    if (!fumbleArmed || now - lastSpeechAt < 1200) return;
+    const el = fumbleTarget();
+    if (!el) return;
+    countdown = { deadline: now + S.fumbleSecs * 1000, el };
+    fumbleEl.textContent = S.fumbleSecs;
+    fumbleEl.hidden = false;
+  }, 200);
 
   // ---------------------------------------------------------------- speech recognition
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -402,6 +509,8 @@ Thanks for watching, and we'll see you in the next video.`;
     let ignore = 0;        // words of the current session to ignore (heard before a jump)
     let session = [];      // words heard in the current session
     let lastWordsAt = 0;
+    let carriedTotal = 0;  // all words heard in earlier sessions (a running count)
+    let lastText = "";
 
     function heardWords() { return carried.concat(session.slice(ignore)); }
     const langShort = () => (lang.startsWith("es") ? "ES" : "EN");
@@ -421,9 +530,12 @@ Thanks for watching, and we'll see you in the next video.`;
         session = words;
         lastWordsAt = Date.now();
         quickFails = 0;
+        const joined = words.join(" ");
+        const changed = joined !== lastText;
+        lastText = joined;
         const shown = text.trim().split(/\s+/).slice(-12).join(" ");
         setHearing(`${langShort()} · ${shown}`, "talking");
-        onHeard(heardWords());
+        onHeard(heardWords(), { changed });
       };
       r.onerror = (e) => {
         const err = e.error;
@@ -460,7 +572,8 @@ Thanks for watching, and we'll see you in the next video.`;
       r.onend = () => {
         // Keep the words from this session so matching stays smooth across restarts.
         carried = carried.concat(session.slice(ignore)).slice(-12);
-        session = []; ignore = 0;
+        carriedTotal += session.length;
+        session = []; ignore = 0; lastText = "";
         if (!wanted) { setHearing("Paused", "idle"); return; }
         const quick = !switching && Date.now() - startedAt < 1500;
         switching = false;
@@ -492,6 +605,8 @@ Thanks for watching, and we'll see you in the next video.`;
     return {
       supported: !!Recognition,
       get lang() { return lang; },
+      /** Running count of words heard (never goes down across restarts). */
+      get count() { return carriedTotal + session.length; },
       start() { if (!Recognition) return false; wanted = true; quickFails = 0; startRec(); return true; },
       stop() { wanted = false; clearTimeout(restartTimer); try { rec && rec.abort(); } catch { } rec = null; },
       /** Switch the listening language (restarts the recognizer if it's running). */
@@ -503,7 +618,16 @@ Thanks for watching, and we'll see you in the next video.`;
       },
       resetHeard() { carried = []; ignore = session.length; },
       /** For automated tests: feed text as if the recognizer heard it. */
-      _feed(text) { session = M.tokenize(text); onHeard(heardWords()); },
+      _feed(text) {
+        const words = M.tokenize(text);
+        if (words.length < ignore) ignore = words.length;
+        const changed = words.join(" ") !== lastText;
+        lastText = words.join(" ");
+        session = words;
+        onHeard(heardWords(), { changed });
+      },
+      /** For automated tests: end the current recognition session (as after a pause). */
+      _endSession() { carried = carried.concat(session.slice(ignore)).slice(-12); carriedTotal += session.length; session = []; ignore = 0; lastText = ""; },
     };
   }
 
@@ -532,6 +656,7 @@ Thanks for watching, and we'll see you in the next video.`;
         pos = elFirstToken[+el.dataset.i];
       }
       running = true;
+      resetFumble();
       listener.setLang(langAt(pos));
       listener.start();
       setHearing("Starting microphone…", "idle");
@@ -611,12 +736,14 @@ Thanks for watching, and we'll see you in the next video.`;
     clearTimeout(hideTimer);
     if (!running) return;
     hideTimer = setTimeout(() => {
-      if (running && !document.querySelector(".panel:not([hidden])") && !$("toolbar").matches(":hover") &&
+      if (running && !document.querySelector(".panel:not([hidden])") && (coarse || !$("toolbar").matches(":hover")) &&
         !$("toolbar").contains(document.activeElement)) document.body.classList.add("bar-hidden");
-    }, 3000);
+    }, 4000);
   }
   document.addEventListener("mousemove", (e) => { if (e.movementX || e.movementY) showBar(); });
   $("showBar").addEventListener("click", showBar);
+  // Touching the controls keeps them up.
+  $("toolbar").addEventListener("pointerdown", showBar);
 
   // ---------------------------------------------------------------- pointer: tap to jump, double-tap to edit, drag to scroll
   const flipV = () => S.mirror === "v" || S.mirror === "both";
@@ -638,6 +765,10 @@ Thanks for watching, and we'll see you in the next video.`;
     const wasDrag = drag.moved;
     drag = null;
     if (wasDrag) { afterManualMove(); return; }
+    // While the countdown shows, a tap cancels it.
+    if (countdown) { hideCountdown(); fumbleArmed = false; return; }
+    // While the controls are hidden, the first tap only brings them back (it doesn't jump).
+    if (document.body.classList.contains("bar-hidden")) { showBar(); return; }
     const hit = document.elementFromPoint(e.clientX, e.clientY);
     const w = hit && hit.closest && hit.closest(".w");
     if (!w) { showBar(); return; }
@@ -658,6 +789,7 @@ Thanks for watching, and we'll see you in the next video.`;
   function jumpToEl(el) {
     pos = elFirstToken[+el.dataset.i];
     listener.resetHeard();
+    resetFumble();
     paintSaid();
     updateListenerLang();
     target = offsetFor(el);
@@ -1060,6 +1192,7 @@ Thanks for watching, and we'll see you in the next video.`;
   window.addEventListener("resize", () => {
     const anchor = currentAnchorEl();
     updateReadingPx();
+    updateBarH();
     measure();
     if (anchor) offset = target = offsetFor(anchor);
     fitEditor();
@@ -1086,6 +1219,8 @@ Thanks for watching, and we'll see you in the next video.`;
   window.__prompter = {
     feed: (t) => listener._feed(t), get pos() { return pos; }, get offset() { return offset; }, get target() { return target; },
     words: () => scriptWords.slice(), setRunning(v) { running = v; paintSaid(); }, settings: S,
+    endSession: () => listener._endSession(), jumpToWord: (i) => jumpToEl(wordEls[i]), get countdown() { return countdown ? fumbleEl.textContent : null; },
+    misses: () => wordEls.filter((w) => w.classList.contains("miss")).map((w) => w.textContent),
     get lang() { return listener.lang; }, langAt: (p) => langAt(p), library: () => JSON.parse(JSON.stringify(lib)),
   };
 })();

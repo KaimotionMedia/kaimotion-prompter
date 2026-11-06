@@ -126,6 +126,14 @@
     "who how all some more very " +
     "de la que el en y los se del las un una por con no su para es al lo como mas pero sus le ya o este si " +
     "porque esta entre cuando muy sin sobre me hasta hay donde desde todo nos ni eso esto mi yo te tu").split(" "));
+  // Contractions (apostrophes are dropped): the recognizer often writes these out ("we are").
+  const CONTRACTIONS = new Set(("youre theyre were weve ive youve theyve ill youll well theyll hell shell im id youd wed theyd " +
+    "dont cant wont isnt arent wasnt werent doesnt didnt couldnt wouldnt shouldnt hasnt havent hadnt " +
+    "thats whats lets its hes shes theres heres wheres whos hows").split(" "));
+  /** Little words, contractions and numbers are never flagged red (too easy to hear or write differently). */
+  function flaggable(w) {
+    return w.length >= 3 && !COMMON.has(w) && !CONTRACTIONS.has(w) && !/^\d/.test(w);
+  }
   function weight(w) {
     if (COMMON.has(w)) return 0.6;
     return w.length >= 6 ? 1.25 : 1;
@@ -268,7 +276,86 @@
     return { pos: newPos, score: best.score, moved: newPos !== pos };
   }
 
-  const api = { normalizeWord, tokenize, similarity, locate, detectLanguage, DEFAULTS };
+  /**
+   * Which script words just before `end` were heard clearly and which were heard wrong.
+   * Aligns the last heard words with the script words ending at `end` (the current position),
+   * then reports, between the first and last clearly heard word:
+   *   ok: true  = heard clearly;  ok: false = heard as a different word (or dropped mid-sentence).
+   * Words heard "almost right" are left out (neither flagged nor cleared).
+   * @returns {{j:number, ok:boolean}[]}
+   */
+  function judge(script, heard, end) {
+    const tail = heard.slice(-12);
+    const from = Math.max(0, end - 18);
+    const n = end - from, m = tail.length;
+    if (n <= 0 || !m) return [];
+    const H = [], T = [], S = [];
+    for (let i = 0; i <= m; i++) { H.push(new Float32Array(n + 1)); T.push(new Uint8Array(n + 1)); S.push(new Float32Array(n + 1)); }
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        const sw = script[from + j - 1];
+        const sim = similarity(tail[i - 1], sw);
+        S[i][j] = sim;
+        const diag = H[i - 1][j - 1] + (sim >= 0.72 ? 2 * sim * weight(sw) : sim < 0.5 ? -0.6 : -0.3);
+        const up = H[i - 1][j] - 1;
+        const left = H[i][j - 1] - 1;
+        let best = 0, t = 0;
+        if (diag > best) { best = diag; t = 1; }
+        if (up > best) { best = up; t = 2; }
+        if (left > best) { best = left; t = 3; }
+        H[i][j] = best; T[i][j] = t;
+      }
+    }
+    // The alignment must reach the current position (script end); trailing heard words are free.
+    let bi = 0;
+    for (let i = 1; i <= m; i++) if (H[i][n] > H[bi][n]) bi = i;
+    if (!bi) return [];
+    const steps = []; // per script index: "ok" | "bad" | "near" | "gap"
+    let i = bi, j = n;
+    while (i > 0 && j > 0 && T[i][j]) {
+      const t = T[i][j];
+      if (t === 1) {
+        const sim = S[i][j];
+        const h = tail[i - 1], w = script[from + j - 1];
+        // Clearly heard: the same word, a spelling variant or the same sound (color/colour, their/there).
+        const alike = (x) => similarity(x, w) >= 0.9 || (Math.min(x.length, w.length) >= 3 && skeleton(x) === skeleton(w));
+        // ...or one word written as two ("Kai motion" for "Kaimotion").
+        const clear = sim >= 0.9 || alike(h) || (i < m && alike(h + tail[i])) || (i > 1 && alike(tail[i - 2] + h));
+        steps.push({ j: from + j - 1, kind: clear ? "ok" : "bad" });
+        i--; j--;
+      } else if (t === 2) i--;
+      else { steps.push({ j: from + j - 1, kind: "gap" }); j--; }
+    }
+    steps.reverse();
+    const first = steps.findIndex((s) => s.kind === "ok");
+    let last = -1;
+    for (let k = steps.length - 1; k >= 0; k--) if (steps[k].kind === "ok") { last = k; break; }
+    if (first < 0) return [];
+    // Count clearly heard words after each step: a word is only flagged once the reader carried on
+    // with at least two clearly heard script words (so a passing guess of the recognizer doesn't flag it).
+    const okAfter = new Array(steps.length).fill(0);
+    for (let k = steps.length - 2; k >= 0; k--) okAfter[k] = okAfter[k + 1] + (steps[k + 1].kind === "ok" ? 1 : 0);
+    const isNum = (k) => k >= 0 && k < steps.length && /^\d/.test(script[steps[k].j]);
+    const out = [];
+    for (let k = first; k <= last; k++) {
+      const s = steps[k];
+      const w = script[s.j];
+      if (s.kind === "ok") out.push({ j: s.j, ok: true });
+      else if (!flaggable(w) || okAfter[k] < 2) continue;
+      else if (s.kind === "bad") out.push({ j: s.j, ok: false });
+      else if (s.kind === "gap") {
+        // A word dropped mid-sentence counts as misread; a longer run is a skipped line.
+        // Next to a number it's usually a symbol the recognizer wrote (45° for "forty five degrees").
+        let a = k, b = k;
+        while (a > first && steps[a - 1].kind === "gap") a--;
+        while (b < last && steps[b + 1].kind === "gap") b++;
+        if (b - a + 1 <= 2 && !isNum(a - 1) && !isNum(b + 1)) out.push({ j: s.j, ok: false });
+      }
+    }
+    return out;
+  }
+
+  const api = { normalizeWord, tokenize, similarity, locate, judge, detectLanguage, DEFAULTS };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.PrompterMatcher = api;
 })(typeof self !== "undefined" ? self : this);
