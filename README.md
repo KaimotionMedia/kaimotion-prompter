@@ -50,8 +50,7 @@ lines don't add more space).
 **Phones:** made to be held sideways. On Android, Start goes full screen and locks the screen
 sideways (turn this off in Settings). iPhone doesn't let web pages lock the rotation: turn off
 Portrait Orientation Lock in Control Center and hold the phone sideways. The button bar sits at the
-bottom of the screen, away from the teleprompter glass (at the top when Mirror is set to upside down,
-so it never covers the reading line). Buttons are at least 48 px, and double-tap zoom is off so
+bottom of the screen, away from the teleprompter glass, even when mirrored. Buttons are at least 48 px, and double-tap zoom is off so
 quick taps all count. It hides itself while prompting; the first tap on the script brings it back
 (that tap doesn't jump).
 
@@ -91,7 +90,7 @@ they stay in the browser of each device. Send that link to the talent; on a phon
 Home Screen** (Safari: Share → Add to Home Screen; Chrome: menu → Install app) and it opens full
 screen like an app, and works offline in Auto mode.
 
-**Updating it later:** change the files, bump `CACHE` in `sw.js` (e.g. `kprompter-v4`), push. Phones
+**Updating it later:** change the files, bump `CACHE` in `sw.js` (e.g. `kprompter-v5`), push. Phones
 that already have it pick up the new version the second time they open it.
 
 ## For developers

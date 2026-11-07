@@ -110,8 +110,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
   transition: transform 0.3s, opacity 0.3s;
 }
 body.bar-hidden #toolbar { transform: translateY(110%); opacity: 0; pointer-events: none; }
-body.bar-top #toolbar { bottom: auto; top: 0; padding-bottom: 8px; padding-top: max(8px, env(safe-area-inset-top)); border-top: 0; border-bottom: 1px solid var(--ui-line); }
-body.bar-top.bar-hidden #toolbar { transform: translateY(-110%); }
 /* Taps register at once: no double-tap zoom on the controls. */
 body, button, select, label, input, .panel, #editor { touch-action: manipulation; }
 .spacer { flex: 1; }
@@ -153,7 +151,6 @@ body.mode-voice #speedBox { display: none; }
   display: none; align-items: center; justify-content: center; cursor: pointer;
 }
 body.bar-hidden #showBar { display: inline-flex; }
-body.bar-top #showBar { bottom: auto; top: max(12px, env(safe-area-inset-top)); }
 
 #hearing {
   position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%);
@@ -165,7 +162,7 @@ body.bar-top #showBar { bottom: auto; top: max(12px, env(safe-area-inset-top)); 
   pointer-events: none;
 }
 #hearing[hidden] { display: none; }
-body:not(.bar-hidden):not(.bar-top) #hearing { bottom: calc(var(--bar-h) + 8px); }
+body:not(.bar-hidden) #hearing { bottom: calc(var(--bar-h) + 8px); }
 #hearingText { overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
 #hearing .dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #3fbf6a; }
 #hearing.idle .dot { background: #777; }
@@ -180,7 +177,6 @@ body:not(.bar-hidden):not(.bar-top) #hearing { bottom: calc(var(--bar-h) + 8px);
   background: #22252b; border: 1px solid var(--ui-line); color: var(--ui-fg);
   font-size: 15px; line-height: 1.4; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
 }
-body.bar-top #toast { bottom: auto; top: calc(var(--bar-h) + 14px); }
 #toast.warn { border-color: #e5a03d; }
 #toast.error { border-color: #e5484d; }
 
@@ -281,7 +277,6 @@ body.mode-auto #lang { display: none; }
 /* ---------- Short screens: phones held sideways ---------- */
 @media (max-height: 520px) {
   #toolbar { gap: 6px; padding-top: 6px; padding-bottom: max(6px, env(safe-area-inset-bottom)); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  body.bar-top #toolbar { padding-top: max(6px, env(safe-area-inset-top)); padding-bottom: 6px; }
   #toolbar::-webkit-scrollbar { display: none; }
   #toolbar > * { flex: none; }
   .tb span, .segbtn span { display: none; }

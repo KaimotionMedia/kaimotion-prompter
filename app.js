@@ -238,8 +238,7 @@ Thanks for watching, and we'll see you in the next video.`;
     $("modeAuto").setAttribute("aria-pressed", S.mode === "auto");
     document.querySelector('meta[name="theme-color"]').content = S.bgColor;
     r.setProperty("--fumble-opacity", S.fumbleOpacity / 100);
-    // Controls sit on the side away from the reading line (it's at the bottom when flipped upside down).
-    document.body.classList.toggle("bar-top", S.mirror === "v" || S.mirror === "both");
+    // Controls always stay at the bottom of the screen (away from the glass), mirrored or not.
     updateBarH();
     syncSettingsForm();
     updateHearingVisibility();
